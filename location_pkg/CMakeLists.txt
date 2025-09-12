@@ -9,11 +9,16 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+# find_package(JPEG REQUIRED)
+find_package(OpenCV REQUIRED)
 
 
 # Ejecutable
 add_executable(visual_node src/visual_odometry.cpp)
-ament_target_dependencies(visual_node rclcpp)
+# target_include_directories(visual_node PRIVATE ${JPEG_INCLUDE_DIR})
+target_include_directories(visual_node PRIVATE)
+# target_link_libraries(visual_node ${JPEG_LIBRARIES} rclcpp::rclcpp)
+target_link_libraries(visual_node ${OpenCV_LIBS} rclcpp::rclcpp)
 
 
 # Instalación
@@ -23,11 +28,7 @@ install(TARGETS visual_node
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
-
   ament_lint_auto_find_test_dependencies()
 endif()
 
