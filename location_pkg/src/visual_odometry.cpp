@@ -95,6 +95,43 @@ void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, st
         svr.listen_after_bind();
 }
 
+void computeOpticalFlow(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
+{
+    if (prev_frame.empty()) 
+    {
+        std::cerr << "Previous frame is empty" << std::endl;
+        return;
+    }
+
+    if (curr_frame.empty()) 
+    {
+        std::cerr << "Current frame is empty" << std::endl;
+        return;
+    }
+
+    cv::Mat flow_xy;
+    cv::calcOpticalFlowFarneback(prev_frame, curr_frame, flow_xy,
+                                 0.5, 3, 15, 3, 5, 1.2, 0);
+
+    flow = prev_frame.clone();
+
+    // Parámetro: cada cuántos pixeles dibujar un vector
+    int step = 16;
+
+    for (int y = 0; y < flow.rows; y += step)
+    {
+        for (int x = 0; x < flow.cols; x += step)
+        {
+            const cv::Point2f& fxy = flow_xy.at<cv::Point2f>(y, x);
+            cv::Point p1(x, y);
+            cv::Point p2(cvRound(x + fxy.x), cvRound(y + fxy.y));
+
+            // Dibujar flecha
+            cv::arrowedLine(flow, p1, p2, cv::Scalar(0, 255, 0), 1, cv::LINE_AA, 0, 0.3);
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
@@ -102,25 +139,25 @@ int main(int argc, char **argv)
     auto node = rclcpp::Node::make_shared("web_stream_node");
 
 
-    // Flags de control
+    // Params for server
+    cv::Mat stream_frame;
     std::atomic<bool> send_flag(true);
     std::atomic<bool> stop_flag(false);
-
-    cv::Mat stream_frame;
-    cv::Mat new_frame;
-
-    // Hilo del servidor HTTP
     std::thread server_thread(start_stream_server, std::ref(stream_frame), std::ref(send_flag), std::ref(stop_flag));
 
-    rclcpp::Rate rate(10);
+
     while (rclcpp::ok()) 
     {
+        static cv::Mat new_frame;
         captureFrame(new_frame);
 
-        stream_frame = new_frame.clone();
+        static cv::Mat prev_frame = new_frame.clone();
 
-        rclcpp::spin_some(node);
-        rate.sleep();
+        static cv::Mat flow_frame;
+        computeOpticalFlow(prev_frame, new_frame, flow_frame);
+
+        stream_frame = flow_frame.clone();
+        prev_frame = new_frame.clone();
     }
 
     // Detener servidor
