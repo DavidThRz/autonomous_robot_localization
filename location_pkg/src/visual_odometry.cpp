@@ -7,8 +7,32 @@
 #include <atomic>
 #include <chrono>
 
-// Función que levanta el servidor MJPEG
-void start_stream_server(cv::VideoCapture &cap, std::atomic<bool> &send_flag, std::atomic<bool> &stop_flag)
+bool captureFrame(cv::Mat& frame)
+{
+    static cv::VideoCapture cap(0, cv::CAP_V4L2 );
+
+    if (!cap.isOpened()) 
+    {
+        std::cerr << "Camera could not be opened" << std::endl;
+        return false;
+    }
+
+    cap >> frame;
+
+    if (frame.empty()) 
+    {
+        std::cerr << "Failed to capture frame" << std::endl;
+        return false;
+    }
+
+    cvtColor(frame, frame, cv::COLOR_BGR2GRAY);
+
+    //TODO: Undistort image
+
+    return true;
+}
+
+void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, std::atomic<bool> &stop_flag)
 {
     httplib::Server svr;
 
@@ -27,13 +51,11 @@ void start_stream_server(cv::VideoCapture &cap, std::atomic<bool> &send_flag, st
                         continue;
                     }
 
-                    cv::Mat frame;
-                    cap >> frame;
-                    if (frame.empty())
+                    if (stream_frame.empty())
                         continue;
 
                     std::vector<uchar> buf;
-                    cv::imencode(".jpg", frame, buf);
+                    cv::imencode(".jpg", stream_frame, buf);
 
                     std::ostringstream os;
                     os << "--frame\r\n"
@@ -79,25 +101,24 @@ int main(int argc, char **argv)
 
     auto node = rclcpp::Node::make_shared("web_stream_node");
 
-    // Abrir la cámara
-    cv::VideoCapture cap(0, cv::CAP_V4L2);
-    if (!cap.isOpened()) 
-    {
-        RCLCPP_ERROR(node->get_logger(), "No se pudo abrir la cámara");
-        rclcpp::shutdown();
-        return 1;
-    }
 
     // Flags de control
     std::atomic<bool> send_flag(true);
     std::atomic<bool> stop_flag(false);
 
+    cv::Mat stream_frame;
+    cv::Mat new_frame;
+
     // Hilo del servidor HTTP
-    std::thread server_thread(start_stream_server, std::ref(cap), std::ref(send_flag), std::ref(stop_flag));
+    std::thread server_thread(start_stream_server, std::ref(stream_frame), std::ref(send_flag), std::ref(stop_flag));
 
     rclcpp::Rate rate(10);
     while (rclcpp::ok()) 
     {
+        captureFrame(new_frame);
+
+        stream_frame = new_frame.clone();
+
         rclcpp::spin_some(node);
         rate.sleep();
     }
@@ -107,7 +128,6 @@ int main(int argc, char **argv)
     if (server_thread.joinable())
         server_thread.join();
 
-    cap.release();
     rclcpp::shutdown();
     return 0;
 }
