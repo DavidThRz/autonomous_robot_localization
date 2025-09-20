@@ -109,15 +109,29 @@ void computeOpticalFlow(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv
         return;
     }
 
-    cv::Mat flow_xy;
+    static cv::Mat flow_xy = cv::Mat::zeros(prev_frame.size(), CV_32FC2);
+
+    //pyr_scale: factor de escala entre pirámides (0 < pyr_scale < 1)
+    static const float pyr_scale = 0.5;  //0.5
+    //levels: número de niveles en la pirámide
+    static const int levels = 2;  //3
+    //winsize: tamaño de la ventana de búsqueda
+    static const int winsize = 13;  //15
+    //iterations: número de iteraciones en cada nivel de la pirámide
+    static const int iterations = 1;  //3
+    //poly_n: tamaño del vecindario para la aproximación polinómica
+    static const int poly_n = 7;  //5
+    //poly_sigma: desviación estándar del filtro Gaussiano
+    static const double poly_sigma = 1.2;
+
     cv::calcOpticalFlowFarneback(prev_frame, curr_frame, flow_xy,
-                                 0.5, 3, 15, 3, 5, 1.2, 0);
+                                 pyr_scale, levels, winsize, iterations,
+                                poly_n, poly_sigma, cv::OPTFLOW_USE_INITIAL_FLOW );
+
 
     flow = prev_frame.clone();
 
-    // Parámetro: cada cuántos pixeles dibujar un vector
     int step = 16;
-
     for (int y = 0; y < flow.rows; y += step)
     {
         for (int x = 0; x < flow.cols; x += step)
