@@ -97,6 +97,19 @@ void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, st
 
 void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
 {
+    //pyr_scale: factor de escala entre pirámides (0 < pyr_scale < 1)
+    static const float pyr_scale = 0.5;
+    //levels: número de niveles en la pirámide
+    static const int levels = 2;
+    //winsize: tamaño de la ventana de búsqueda
+    static const int winsize = 13;
+    //iterations: número de iteraciones en cada nivel de la pirámide
+    static const int iterations = 1;
+    //poly_n: tamaño del vecindario para la aproximación polinómica
+    static const int poly_n = 7;
+    //poly_sigma: desviación estándar del filtro Gaussiano
+    static const double poly_sigma = 1.2;
+    
     if (prev_frame.empty()) 
     {
         std::cerr << "Previous frame is empty" << std::endl;
@@ -110,20 +123,6 @@ void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_
     }
 
     static cv::Mat flow_xy = cv::Mat::zeros(prev_frame.size(), CV_32FC2);
-
-    //pyr_scale: factor de escala entre pirámides (0 < pyr_scale < 1)
-    static const float pyr_scale = 0.5;  //0.5
-    //levels: número de niveles en la pirámide
-    static const int levels = 2;  //3
-    //winsize: tamaño de la ventana de búsqueda
-    static const int winsize = 13;  //15
-    //iterations: número de iteraciones en cada nivel de la pirámide
-    static const int iterations = 1;  //3
-    //poly_n: tamaño del vecindario para la aproximación polinómica
-    static const int poly_n = 7;  //5
-    //poly_sigma: desviación estándar del filtro Gaussiano
-    static const double poly_sigma = 1.2;
-
     cv::calcOpticalFlowFarneback(prev_frame, curr_frame, flow_xy,
                                  pyr_scale, levels, winsize, iterations,
                                 poly_n, poly_sigma, cv::OPTFLOW_USE_INITIAL_FLOW );
@@ -148,6 +147,13 @@ void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_
 
 void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
 {
+    // maxCorners: número máximo de esquinas a detectar
+    static const int maxCorners = 100;
+    // qualityLevel: calidad mínima de las esquinas (0 < qualityLevel < 1)
+    static const double qualityLevel = 0.1;
+    // minDistance: distancia mínima entre esquinas detectadas
+    static const double minDistance = 10.0;
+
     if (prev_frame.empty()) 
     {
         std::cerr << "Previous frame is empty" << std::endl;
@@ -161,7 +167,7 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
     }
 
     std::vector<cv::Point2f> prev_pts;
-    cv::goodFeaturesToTrack(prev_frame, prev_pts, 200, 0.01, 10);   //TODO: ajustar parámetros
+    cv::goodFeaturesToTrack(prev_frame, prev_pts, maxCorners, qualityLevel, minDistance);
 
     if (prev_pts.empty())
         return;
