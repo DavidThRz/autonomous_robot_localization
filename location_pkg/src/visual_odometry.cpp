@@ -95,7 +95,7 @@ void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, st
         svr.listen_after_bind();
 }
 
-void computeOpticalFlow(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
+void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
 {
     if (prev_frame.empty()) 
     {
@@ -146,6 +146,44 @@ void computeOpticalFlow(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv
     }
 }
 
+void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
+{
+    if (prev_frame.empty()) 
+    {
+        std::cerr << "Previous frame is empty" << std::endl;
+        return;
+    }
+
+    if (curr_frame.empty()) 
+    {
+        std::cerr << "Current frame is empty" << std::endl;
+        return;
+    }
+
+    std::vector<cv::Point2f> prev_pts;
+    cv::goodFeaturesToTrack(prev_frame, prev_pts, 200, 0.01, 10);   //TODO: ajustar parámetros
+
+    if (prev_pts.empty())
+        return;
+
+    std::vector<cv::Point2f> curr_pts;
+    std::vector<uchar> status;
+    std::vector<float> err;
+    cv::calcOpticalFlowPyrLK(prev_frame, curr_frame, prev_pts, curr_pts, status, err);
+
+    flow = prev_frame.clone();
+    cv::cvtColor(flow, flow, cv::COLOR_GRAY2BGR);
+
+    for (size_t i = 0; i < prev_pts.size(); ++i)
+    {
+        if (status[i])
+        {
+            cv::arrowedLine(flow, prev_pts[i], curr_pts[i], cv::Scalar(0, 0, 255), 2, cv::LINE_AA, 0, 0.3);
+            cv::circle(flow, curr_pts[i], 2, cv::Scalar(0, 255, 0), -1);
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
@@ -165,10 +203,9 @@ int main(int argc, char **argv)
 
         static cv::Mat prev_frame = new_frame.clone();
 
-        static cv::Mat flow_frame;
-        computeOpticalFlow(prev_frame, new_frame, flow_frame);
+        // computeOpticalFlowFarneback(prev_frame, new_frame, stream_frame);
+        computeOpticalFlowLK(prev_frame, new_frame, stream_frame);
 
-        stream_frame = flow_frame.clone();
         prev_frame = new_frame.clone();
     }
 
