@@ -95,39 +95,132 @@ void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, st
         svr.listen_after_bind();
 }
 
+void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
+{
+    //pyr_scale: factor de escala entre pirámides (0 < pyr_scale < 1)
+    static const float pyr_scale = 0.5;
+    //levels: número de niveles en la pirámide
+    static const int levels = 2;
+    //winsize: tamaño de la ventana de búsqueda
+    static const int winsize = 13;
+    //iterations: número de iteraciones en cada nivel de la pirámide
+    static const int iterations = 1;
+    //poly_n: tamaño del vecindario para la aproximación polinómica
+    static const int poly_n = 7;
+    //poly_sigma: desviación estándar del filtro Gaussiano
+    static const double poly_sigma = 1.2;
+    
+    if (prev_frame.empty()) 
+    {
+        std::cerr << "Previous frame is empty" << std::endl;
+        return;
+    }
+
+    if (curr_frame.empty()) 
+    {
+        std::cerr << "Current frame is empty" << std::endl;
+        return;
+    }
+
+    static cv::Mat flow_xy = cv::Mat::zeros(prev_frame.size(), CV_32FC2);
+    cv::calcOpticalFlowFarneback(prev_frame, curr_frame, flow_xy,
+                                 pyr_scale, levels, winsize, iterations,
+                                poly_n, poly_sigma, cv::OPTFLOW_USE_INITIAL_FLOW );
+
+
+    flow = prev_frame.clone();
+
+    int step = 16;
+    for (int y = 0; y < flow.rows; y += step)
+    {
+        for (int x = 0; x < flow.cols; x += step)
+        {
+            const cv::Point2f& fxy = flow_xy.at<cv::Point2f>(y, x);
+            cv::Point p1(x, y);
+            cv::Point p2(cvRound(x + fxy.x), cvRound(y + fxy.y));
+
+            // Dibujar flecha
+            cv::arrowedLine(flow, p1, p2, cv::Scalar(0, 255, 0), 1, cv::LINE_AA, 0, 0.3);
+        }
+    }
+}
+
+void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
+{
+    // maxCorners: número máximo de esquinas a detectar
+    static const int maxCorners = 100;
+    // qualityLevel: calidad mínima de las esquinas (0 < qualityLevel < 1)
+    static const double qualityLevel = 0.1;
+    // minDistance: distancia mínima entre esquinas detectadas
+    static const double minDistance = 10.0;
+
+    if (prev_frame.empty()) 
+    {
+        std::cerr << "Previous frame is empty" << std::endl;
+        return;
+    }
+
+    if (curr_frame.empty()) 
+    {
+        std::cerr << "Current frame is empty" << std::endl;
+        return;
+    }
+
+    std::vector<cv::Point2f> prev_pts;
+    cv::goodFeaturesToTrack(prev_frame, prev_pts, maxCorners, qualityLevel, minDistance);
+
+    if (prev_pts.empty())
+        return;
+
+    std::vector<cv::Point2f> curr_pts;
+    std::vector<uchar> status;
+    std::vector<float> err;
+    cv::calcOpticalFlowPyrLK(prev_frame, curr_frame, prev_pts, curr_pts, status, err);
+
+    flow = prev_frame.clone();
+    cv::cvtColor(flow, flow, cv::COLOR_GRAY2BGR);
+
+    for (size_t i = 0; i < prev_pts.size(); ++i)
+    {
+        if (status[i])
+        {
+            cv::arrowedLine(flow, prev_pts[i], curr_pts[i], cv::Scalar(0, 0, 255), 2, cv::LINE_AA, 0, 0.3);
+            cv::circle(flow, curr_pts[i], 2, cv::Scalar(0, 255, 0), -1);
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
+    auto node = rclcpp::Node::make_shared("visual_odometry_node");
 
-    auto node = rclcpp::Node::make_shared("web_stream_node");
-
-
-    // Flags de control
+    // Params for server
+    cv::Mat stream_frame;
     std::atomic<bool> send_flag(true);
     std::atomic<bool> stop_flag(false);
-
-    cv::Mat stream_frame;
-    cv::Mat new_frame;
-
-    // Hilo del servidor HTTP
     std::thread server_thread(start_stream_server, std::ref(stream_frame), std::ref(send_flag), std::ref(stop_flag));
 
-    rclcpp::Rate rate(10);
+
     while (rclcpp::ok()) 
     {
+        static cv::Mat new_frame;
         captureFrame(new_frame);
 
-        stream_frame = new_frame.clone();
+        static cv::Mat prev_frame = new_frame.clone();
 
-        rclcpp::spin_some(node);
-        rate.sleep();
+        // computeOpticalFlowFarneback(prev_frame, new_frame, stream_frame);
+        computeOpticalFlowLK(prev_frame, new_frame, stream_frame);
+
+        prev_frame = new_frame.clone();
     }
+
+    rclcpp::shutdown();
 
     // Detener servidor
     stop_flag = true;
     if (server_thread.joinable())
         server_thread.join();
 
-    rclcpp::shutdown();
     return 0;
 }
