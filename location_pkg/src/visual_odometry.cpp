@@ -149,9 +149,7 @@ void computeOpticalFlow(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-
-    auto node = rclcpp::Node::make_shared("web_stream_node");
-
+    auto node = rclcpp::Node::make_shared("visual_odometry_node");
 
     // Params for server
     cv::Mat stream_frame;
@@ -174,11 +172,12 @@ int main(int argc, char **argv)
         prev_frame = new_frame.clone();
     }
 
+    rclcpp::shutdown();
+
     // Detener servidor
     stop_flag = true;
     if (server_thread.joinable())
         server_thread.join();
 
-    rclcpp::shutdown();
     return 0;
 }
