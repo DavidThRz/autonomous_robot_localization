@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 # Incluye el directorio donde está httplib.h
 include_directories(
@@ -20,9 +21,10 @@ include_directories(
 add_executable(visual_node src/visual_odometry.cpp)
 
 # Vincula las bibliotecas necesarias
-target_link_libraries(visual_node PUBLIC
-  rclcpp::rclcpp
-  ${OpenCV_LIBRARIES}
+ament_target_dependencies(visual_node
+  rclcpp
+  geometry_msgs
+  OpenCV
 )
 
 # Instala el ejecutable

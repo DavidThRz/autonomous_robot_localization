@@ -7,6 +7,8 @@
 #include <atomic>
 #include <chrono>
 
+#include "geometry_msgs/msg/twist.hpp"
+
 bool captureFrame(cv::Mat& frame)
 {
     static cv::VideoCapture cap(0, cv::CAP_V4L2 );
@@ -95,7 +97,7 @@ void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, st
         svr.listen_after_bind();
 }
 
-void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
+void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow)
 {
     //pyr_scale: factor de escala entre pirámides (0 < pyr_scale < 1)
     static const float pyr_scale = 0.5;
@@ -139,13 +141,15 @@ void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_
             cv::Point p1(x, y);
             cv::Point p2(cvRound(x + fxy.x), cvRound(y + fxy.y));
 
-            // Dibujar flecha
+            prev_pts.push_back(p1);
+            curr_pts.push_back(p2);
+
             cv::arrowedLine(flow, p1, p2, cv::Scalar(0, 255, 0), 1, cv::LINE_AA, 0, 0.3);
         }
     }
 }
 
-void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
+void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow)
 {
     // maxCorners: número máximo de esquinas a detectar
     static const int maxCorners = 100;
@@ -166,13 +170,11 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
         return;
     }
 
-    std::vector<cv::Point2f> prev_pts;
     cv::goodFeaturesToTrack(prev_frame, prev_pts, maxCorners, qualityLevel, minDistance);
 
     if (prev_pts.empty())
         return;
 
-    std::vector<cv::Point2f> curr_pts;
     std::vector<uchar> status;
     std::vector<float> err;
     cv::calcOpticalFlowPyrLK(prev_frame, curr_frame, prev_pts, curr_pts, status, err);
@@ -193,7 +195,9 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    auto node = rclcpp::Node::make_shared("visual_odometry_node");
+    rclcpp::Node::SharedPtr node = rclcpp::Node::make_shared("visual_odometry_node");
+    auto twist_pub = node->create_publisher<geometry_msgs::msg::Twist>("visual_odometry/twist", 10);
+
 
     // Params for server
     cv::Mat stream_frame;
@@ -209,8 +213,63 @@ int main(int argc, char **argv)
 
         static cv::Mat prev_frame = new_frame.clone();
 
-        // computeOpticalFlowFarneback(prev_frame, new_frame, stream_frame);
-        computeOpticalFlowLK(prev_frame, new_frame, stream_frame);
+        std::vector<cv::Point2f> prev_pts, curr_pts;
+
+        // computeOpticalFlowFarneback(prev_frame, new_frame, prev_pts, curr_pts, stream_frame);
+        computeOpticalFlowLK(prev_frame, new_frame, prev_pts, curr_pts, stream_frame);
+
+        // Obtain translation
+        cv::Point2f mass_center_prev = cv::Point2f(0,0);
+        cv::Point2f mass_center_curr = cv::Point2f(0,0);
+        for (size_t i = 0; i < prev_pts.size(); ++i)
+        {
+            mass_center_prev += prev_pts[i];
+            mass_center_curr += curr_pts[i];
+        }
+        if (!prev_pts.empty())
+        {
+            mass_center_prev *= (1.0f / prev_pts.size());
+            mass_center_curr *= (1.0f / curr_pts.size());
+        }
+        cv::Point2f translation = mass_center_curr - mass_center_prev;
+
+        // Obtain rotation
+        double angle = 0.0;
+        std::vector<cv::Mat> vector_prev, vector_curr;
+        for (size_t i = 0; i < prev_pts.size(); ++i) 
+        {
+            cv::Mat v_prev = (cv::Mat_<double>(2,1) << prev_pts[i].x - mass_center_prev.x, prev_pts[i].y - mass_center_prev.y);
+            cv::Mat v_curr = (cv::Mat_<double>(2,1) << curr_pts[i].x - mass_center_curr.x, curr_pts[i].y - mass_center_curr.y);
+            vector_prev.push_back(v_prev);
+            vector_curr.push_back(v_curr);
+        }
+
+        cv::Mat R = cv::Mat::zeros(2, 2, CV_64F);
+        for (size_t i = 0; i < vector_prev.size(); ++i) 
+        {
+            R += vector_curr[i] * vector_prev[i].t();
+        }
+        R /= static_cast<double>(vector_prev.size());
+
+        cv::SVD svd(R);
+        cv::Mat R_ortho = svd.u * svd.vt;
+        angle = atan2(R_ortho.at<double>(1,0), R_ortho.at<double>(0,0)) * 180.0 / CV_PI;
+
+        static double total_angle = 0.0;
+        static cv::Point2f total_translation = cv::Point2f(0,0);
+        total_angle += angle;
+        total_translation += translation;
+        
+        geometry_msgs::msg::Twist twist_msg;
+        twist_msg.linear.x = translation.x;
+        twist_msg.linear.y = translation.y;
+        twist_msg.linear.z = 0.0;
+        twist_msg.angular.x = 0.0;
+        twist_msg.angular.y = 0.0;
+        twist_msg.angular.z = angle; // ángulo en grados o radianes según tu EKF
+
+        twist_pub->publish(twist_msg);
+
 
         prev_frame = new_frame.clone();
     }
