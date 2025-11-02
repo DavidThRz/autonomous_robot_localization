@@ -6,28 +6,90 @@
 #include <sstream>
 #include <atomic>
 #include <chrono>
+#include <iostream>
+
+#include <libcamera/libcamera.h>
+#include <libcamera/framebuffer_allocator.h>
+#include <libcamera/camera_manager.h>
+#include <fstream>
+#include <sys/mman.h>
 
 bool captureFrame(cv::Mat& frame)
 {
-    static cv::VideoCapture cap(0, cv::CAP_V4L2 );
+    // Inicializa el CameraManager
+    libcamera::CameraManager manager;
+    manager.start();
 
-    if (!cap.isOpened()) 
+    if (manager.cameras().empty()) 
     {
-        std::cerr << "Camera could not be opened" << std::endl;
+        std::cerr << "No se encontraron cámaras." << std::endl;
         return false;
     }
 
-    cap >> frame;
+    // Abre la primera cámara
+    std::shared_ptr<libcamera::Camera> camera = manager.cameras()[0];
+    camera->acquire();
 
-    if (frame.empty()) 
+    // Configuración por defecto para una sola imagen
+    std::unique_ptr<libcamera::CameraConfiguration> config = camera->generateConfiguration({ libcamera::StreamRole::StillCapture });
+    libcamera::StreamConfiguration &streamConfig = config->at(0);
+    streamConfig.size.width = 640;
+    streamConfig.size.height = 480;
+    streamConfig.pixelFormat = libcamera::formats::BGR888;
+    config->validate();
+
+    camera->configure(config.get());
+
+    // Asigna memoria para los buffers
+    libcamera::FrameBufferAllocator allocator(camera);
+    libcamera::Stream *stream = streamConfig.stream();
+    allocator.allocate(stream);
+    const auto &buffers = allocator.buffers(stream);
+
+    // Crea una cola de requests
+    std::unique_ptr<libcamera::Request> request = camera->createRequest();
+    const auto &fb = buffers[0].get();
+    request->addBuffer(stream, fb);
+
+    // Inicia la cámara
+    camera->start();
+
+    // Envía el request
+    camera->queueRequest(request.get());
+
+    // Espera a que llegue el frame
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // Detiene la cámara
+    camera->stop();
+
+    // Guarda el resultado (formato RAW)
+    auto &plane = fb->planes()[0];
+    void *mem = mmap(NULL, plane.length, PROT_READ, MAP_SHARED, plane.fd.get(), 0);
+    if (mem == MAP_FAILED) 
     {
-        std::cerr << "Failed to capture frame" << std::endl;
+        std::cerr << "Error al mapear la memoria del frame" << std::endl;
+        camera->release();
+        manager.stop();
         return false;
     }
+    
+    int width = streamConfig.size.width;
+    int height = streamConfig.size.height;
 
-    cvtColor(frame, frame, cv::COLOR_BGR2GRAY);
+    // Copiamos los datos del buffer
+    cv::Mat yuv(height, width, CV_8UC3, mem);
 
-    //TODO: Undistort image
+    // Guardar como JPEG (calidad por defecto)
+    if (!cv::imwrite("/home/davith/autonomous_robot_localization/frame.jpg", yuv)) {
+        std::cerr << "Error al guardar frame.jpg" << std::endl;
+    }
+    munmap(mem, plane.length);
+
+    std::cout << "Imagen capturada y guardada como frame.jpg" << std::endl;
+
+    camera->release();
+    manager.stop();
 
     return true;
 }
@@ -205,14 +267,15 @@ int main(int argc, char **argv)
     while (rclcpp::ok()) 
     {
         static cv::Mat new_frame;
-        captureFrame(new_frame);
+        captureFrame(stream_frame);
+        return 0;
 
-        static cv::Mat prev_frame = new_frame.clone();
+        // static cv::Mat prev_frame = new_frame.clone();
 
         // computeOpticalFlowFarneback(prev_frame, new_frame, stream_frame);
-        computeOpticalFlowLK(prev_frame, new_frame, stream_frame);
+        // computeOpticalFlowLK(prev_frame, new_frame, stream_frame);
 
-        prev_frame = new_frame.clone();
+        // prev_frame = new_frame.clone();
     }
 
     rclcpp::shutdown();

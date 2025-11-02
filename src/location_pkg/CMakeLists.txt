@@ -14,6 +14,7 @@ find_package(OpenCV REQUIRED)
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include 
     /usr/local/include
+    /usr/include/libcamera
 )
 
 # Añade el ejecutable
@@ -23,6 +24,8 @@ add_executable(visual_node src/visual_odometry.cpp)
 target_link_libraries(visual_node PUBLIC
   rclcpp::rclcpp
   ${OpenCV_LIBRARIES}
+  camera
+  camera-base
 )
 
 # Instala el ejecutable
