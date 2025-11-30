@@ -53,6 +53,7 @@ static void requestComplete(Request *request)
         int height = bufferPair.first->configuration().size.height;
 
         cv::Mat img(height, width, CV_8UC3, mem);
+        cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
 
         std::ostringstream name;
         name << "/home/davith/capturas/" << metadata.timestamp << ".jpg";
