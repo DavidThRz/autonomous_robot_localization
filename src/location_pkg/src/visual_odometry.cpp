@@ -14,84 +14,155 @@
 #include <fstream>
 #include <sys/mman.h>
 
-bool captureFrame(cv::Mat& frame)
-{
-    // Inicializa el CameraManager
-    libcamera::CameraManager manager;
-    manager.start();
+#include <iomanip>
+#include <iostream>
+#include <memory>
 
-    if (manager.cameras().empty()) 
+using namespace libcamera;
+using namespace std::chrono_literals;
+
+static std::shared_ptr<Camera> camera;
+
+static void requestComplete(Request *request)
+{
+    if (request->status() == Request::RequestCancelled) 
     {
-        std::cerr << "No se encontraron cámaras." << std::endl;
-        return false;
+        std::cerr << "\nRequest was cancelled" << std::endl;
+        return;
     }
 
-    // Abre la primera cámara
-    std::shared_ptr<libcamera::Camera> camera = manager.cameras()[0];
-    camera->acquire();
+    // Save buffers
+    const std::map<const Stream *, FrameBuffer *> &buffers = request->buffers();
+    for (auto bufferPair : buffers)
+    {
+        FrameBuffer *buffer = bufferPair.second;
+        const FrameMetadata &metadata = buffer->metadata();
 
-    // Configuración por defecto para una sola imagen
-    std::unique_ptr<libcamera::CameraConfiguration> config = camera->generateConfiguration({ libcamera::StreamRole::StillCapture });
-    libcamera::StreamConfiguration &streamConfig = config->at(0);
-    streamConfig.size.width = 640;
-    streamConfig.size.height = 480;
-    streamConfig.pixelFormat = libcamera::formats::BGR888;
-    config->validate();
+        if (buffer->planes().empty())
+            continue;
 
-    camera->configure(config.get());
+        const FrameBuffer::Plane &plane = buffer->planes()[0];
+        void *mem = mmap(nullptr, plane.length, PROT_READ | PROT_WRITE, MAP_SHARED, plane.fd.get(), 0);
+        if (mem == MAP_FAILED) 
+        {
+            std::cerr << "mmap failed\n";
+            continue;
+        }
 
-    // Asigna memoria para los buffers
-    libcamera::FrameBufferAllocator allocator(camera);
-    libcamera::Stream *stream = streamConfig.stream();
-    allocator.allocate(stream);
-    const auto &buffers = allocator.buffers(stream);
+        int width  = bufferPair.first->configuration().size.width;
+        int height = bufferPair.first->configuration().size.height;
 
-    // Crea una cola de requests
-    std::unique_ptr<libcamera::Request> request = camera->createRequest();
-    const auto &fb = buffers[0].get();
-    request->addBuffer(stream, fb);
+        cv::Mat img(height, width, CV_8UC3, mem);
 
-    // Inicia la cámara
+        std::ostringstream name;
+        name << "/home/davith/capturas/" << metadata.timestamp << ".jpg";
+        if (!cv::imwrite(name.str(), img)) 
+            std::cerr << "Error al guardar " << name.str() << std::endl;
+
+        munmap(mem, plane.length);
+
+        std::cout << "Guardada imagen: " << name.str() << std::endl;
+    }
+
+    request->reuse(Request::ReuseBuffers);
+    camera->queueRequest(request);
+}
+
+int captureFrame(cv::Mat& frame)
+{
+    // Variables to initialize only once
+    static std::unique_ptr<CameraManager> cm = std::make_unique<CameraManager>();
+    static std::unique_ptr<CameraConfiguration> config;
+    static FrameBufferAllocator *allocator;
+    static StreamConfiguration *streamConfig = nullptr;
+
+    static bool initialized = false;
+    if (!initialized)
+    {
+        initialized = true;
+        std::cout << "\nInitializing Camera Manager..." << std::endl;
+
+        cm->start();
+
+        // Check if there are any cameras
+        auto cameras = cm->cameras();
+        if (cameras.empty()) 
+        {
+            std::cout << "No cameras were identified on the system" << std::endl;
+            cm->stop();
+            return -2;
+        }
+
+        std::cout << "\nAvailable cameras:" << std::endl;
+        for (auto const &camera : cm->cameras())
+            std::cout << camera->id() << std::endl;
+
+        // Select the first available camera
+        std::string camera_id = cm->cameras()[0]->id();
+        camera = cm->get(camera_id);
+        camera->acquire();
+        std::cout << "Camera acquired: " << camera->id() << std::endl;
+
+        // Configure the camera
+        config = camera->generateConfiguration( { StreamRole::StillCapture } );  //This may affect performance, try StreamRole::Viewfinder or StreamRole::VideoRecording for better fps
+        streamConfig = &config->at(0);
+        streamConfig->size.width  = 1920;
+        streamConfig->size.height = 1080;
+        streamConfig->pixelFormat = libcamera::formats::BGR888;
+        std::cout << "\nSelected camera configuration: " << streamConfig->toString() << std::endl;
+        config->validate();
+        camera->configure(config.get());
+
+        // Allocate buffers
+        allocator = new FrameBufferAllocator(camera);
+        int ret = allocator->allocate(streamConfig->stream());
+        if (ret < 0) 
+        {
+            std::cerr << "Failed to allocate buffers" << std::endl;
+            return -3;
+        }
+        size_t allocated = allocator->buffers(streamConfig->stream()).size();
+        std::cout << "\nAllocated " << allocated << " buffers for the camera" << std::endl;
+
+        std::cout << "\nCamera initialized!\n\n" << std::endl;
+    }
+
+    // Configure stream
+    static Stream *stream = streamConfig->stream();
+    std::unique_ptr<Request> request = camera->createRequest();
+    if (!request) 
+    {
+        std::cerr << "Failed to create request" << std::endl;
+        return -4;
+    }
+
+    const std::unique_ptr<FrameBuffer> &buffer = allocator->buffers(stream)[0];
+    int ret = request->addBuffer(stream, buffer.get());
+    if (ret < 0) 
+    {
+        std::cerr << "Failed to add buffer to request" << std::endl;
+        return -5;
+    }
+
+    // Connect callback
+    camera->requestCompleted.connect(requestComplete);
+
+    // Start camera
     camera->start();
-
-    // Envía el request
     camera->queueRequest(request.get());
 
-    // Espera a que llegue el frame
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    // Capture frames for some time
+    std::this_thread::sleep_for(1500ms);
 
-    // Detiene la cámara
+    // Stop camera
     camera->stop();
-
-    // Guarda el resultado (formato RAW)
-    auto &plane = fb->planes()[0];
-    void *mem = mmap(NULL, plane.length, PROT_READ, MAP_SHARED, plane.fd.get(), 0);
-    if (mem == MAP_FAILED) 
-    {
-        std::cerr << "Error al mapear la memoria del frame" << std::endl;
-        camera->release();
-        manager.stop();
-        return false;
-    }
-    
-    int width = streamConfig.size.width;
-    int height = streamConfig.size.height;
-
-    // Copiamos los datos del buffer
-    cv::Mat yuv(height, width, CV_8UC3, mem);
-
-    // Guardar como JPEG (calidad por defecto)
-    if (!cv::imwrite("/home/davith/autonomous_robot_localization/frame.jpg", yuv)) {
-        std::cerr << "Error al guardar frame.jpg" << std::endl;
-    }
-    munmap(mem, plane.length);
-
-    std::cout << "Imagen capturada y guardada como frame.jpg" << std::endl;
-
+    allocator->free(streamConfig->stream());
+    delete allocator;
     camera->release();
-    manager.stop();
+    camera.reset();
+    cm->stop();
 
-    return true;
+    return -1;  //For now
 }
 
 void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, std::atomic<bool> &stop_flag)
@@ -267,8 +338,8 @@ int main(int argc, char **argv)
     while (rclcpp::ok()) 
     {
         static cv::Mat new_frame;
-        captureFrame(stream_frame);
-        return 0;
+        if (captureFrame(new_frame) < 0)
+            break;
 
         // static cv::Mat prev_frame = new_frame.clone();
 
@@ -278,6 +349,8 @@ int main(int argc, char **argv)
         // prev_frame = new_frame.clone();
     }
 
+    // Stop ROS
+    std::cout << "\n========================\n  Shutting down ROS...\n========================\n" << std::endl;
     rclcpp::shutdown();
 
     // Detener servidor
