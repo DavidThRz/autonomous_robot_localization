@@ -5,30 +5,35 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# Dependencias
+# Dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
 
-# Incluye el directorio donde está httplib.h
+# Include libraries
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include 
     /usr/local/include
     /usr/include/libcamera
 )
 
-# Añade el ejecutable
-add_executable(visual_node src/visual_odometry.cpp)
-
-# Vincula las bibliotecas necesarias
-target_link_libraries(visual_node PUBLIC
+# Photographer node
+add_executable(photographer_node src/photographer.cpp)
+target_link_libraries(photographer_node PUBLIC
   rclcpp::rclcpp
   ${OpenCV_LIBRARIES}
   camera
   camera-base
 )
+install(TARGETS photographer_node
+  DESTINATION lib/${PROJECT_NAME})
 
-# Instala el ejecutable
+# Visual odometry node
+add_executable(visual_node src/visual_odometry.cpp)
+target_link_libraries(visual_node PUBLIC
+  rclcpp::rclcpp
+  ${OpenCV_LIBRARIES}
+)
 install(TARGETS visual_node
   DESTINATION lib/${PROJECT_NAME})
 

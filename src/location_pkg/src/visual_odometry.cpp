@@ -1,170 +1,17 @@
+/**
+ *  visual_odometry.cpp
+ *  Created on: November 30, 2025
+ *  
+ *  This file is part of the Autonomous Robot Localization 
+ *  project.
+ *  It receives images from the photographer and computes 
+ *  the position of the robot using visual odometry.
+ */
+ 
 #include "rclcpp/rclcpp.hpp"
 #include <opencv2/opencv.hpp>
+
 #include <httplib.h>
-#include <thread>
-#include <vector>
-#include <sstream>
-#include <atomic>
-#include <chrono>
-#include <iostream>
-
-#include <libcamera/libcamera.h>
-#include <libcamera/framebuffer_allocator.h>
-#include <libcamera/camera_manager.h>
-#include <fstream>
-#include <sys/mman.h>
-
-#include <iomanip>
-#include <iostream>
-#include <memory>
-
-using namespace libcamera;
-using namespace std::chrono_literals;
-
-static std::shared_ptr<Camera> camera;
-
-static void requestComplete(Request *request)
-{
-    if (request->status() == Request::RequestCancelled) 
-    {
-        std::cerr << "\nRequest was cancelled" << std::endl;
-        return;
-    }
-
-    // Save buffers
-    const std::map<const Stream *, FrameBuffer *> &buffers = request->buffers();
-    for (auto bufferPair : buffers)
-    {
-        FrameBuffer *buffer = bufferPair.second;
-        const FrameMetadata &metadata = buffer->metadata();
-
-        if (buffer->planes().empty())
-            continue;
-
-        const FrameBuffer::Plane &plane = buffer->planes()[0];
-        void *mem = mmap(nullptr, plane.length, PROT_READ | PROT_WRITE, MAP_SHARED, plane.fd.get(), 0);
-        if (mem == MAP_FAILED) 
-        {
-            std::cerr << "mmap failed\n";
-            continue;
-        }
-
-        int width  = bufferPair.first->configuration().size.width;
-        int height = bufferPair.first->configuration().size.height;
-
-        cv::Mat img(height, width, CV_8UC3, mem);
-        cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
-
-        std::ostringstream name;
-        name << "/home/davith/capturas/" << metadata.timestamp << ".jpg";
-        if (!cv::imwrite(name.str(), img)) 
-            std::cerr << "Error al guardar " << name.str() << std::endl;
-
-        munmap(mem, plane.length);
-
-        std::cout << "Guardada imagen: " << name.str() << std::endl;
-    }
-
-    request->reuse(Request::ReuseBuffers);
-    camera->queueRequest(request);
-}
-
-int captureFrame(cv::Mat& frame)
-{
-    // Variables to initialize only once
-    static std::unique_ptr<CameraManager> cm = std::make_unique<CameraManager>();
-    static std::unique_ptr<CameraConfiguration> config;
-    static FrameBufferAllocator *allocator;
-    static StreamConfiguration *streamConfig = nullptr;
-
-    static bool initialized = false;
-    if (!initialized)
-    {
-        initialized = true;
-        std::cout << "\nInitializing Camera Manager..." << std::endl;
-
-        cm->start();
-
-        // Check if there are any cameras
-        auto cameras = cm->cameras();
-        if (cameras.empty()) 
-        {
-            std::cout << "No cameras were identified on the system" << std::endl;
-            cm->stop();
-            return -2;
-        }
-
-        std::cout << "\nAvailable cameras:" << std::endl;
-        for (auto const &camera : cm->cameras())
-            std::cout << camera->id() << std::endl;
-
-        // Select the first available camera
-        std::string camera_id = cm->cameras()[0]->id();
-        camera = cm->get(camera_id);
-        camera->acquire();
-        std::cout << "Camera acquired: " << camera->id() << std::endl;
-
-        // Configure the camera
-        config = camera->generateConfiguration( { StreamRole::StillCapture } );  //This may affect performance, try StreamRole::Viewfinder or StreamRole::VideoRecording for better fps
-        streamConfig = &config->at(0);
-        streamConfig->size.width  = 1920;
-        streamConfig->size.height = 1080;
-        streamConfig->pixelFormat = libcamera::formats::BGR888;
-        std::cout << "\nSelected camera configuration: " << streamConfig->toString() << std::endl;
-        config->validate();
-        camera->configure(config.get());
-
-        // Allocate buffers
-        allocator = new FrameBufferAllocator(camera);
-        int ret = allocator->allocate(streamConfig->stream());
-        if (ret < 0) 
-        {
-            std::cerr << "Failed to allocate buffers" << std::endl;
-            return -3;
-        }
-        size_t allocated = allocator->buffers(streamConfig->stream()).size();
-        std::cout << "\nAllocated " << allocated << " buffers for the camera" << std::endl;
-
-        std::cout << "\nCamera initialized!\n\n" << std::endl;
-    }
-
-    // Configure stream
-    static Stream *stream = streamConfig->stream();
-    std::unique_ptr<Request> request = camera->createRequest();
-    if (!request) 
-    {
-        std::cerr << "Failed to create request" << std::endl;
-        return -4;
-    }
-
-    const std::unique_ptr<FrameBuffer> &buffer = allocator->buffers(stream)[0];
-    int ret = request->addBuffer(stream, buffer.get());
-    if (ret < 0) 
-    {
-        std::cerr << "Failed to add buffer to request" << std::endl;
-        return -5;
-    }
-
-    // Connect callback
-    camera->requestCompleted.connect(requestComplete);
-
-    // Start camera
-    camera->start();
-    camera->queueRequest(request.get());
-
-    // Capture frames for some time
-    std::this_thread::sleep_for(1500ms);
-
-    // Stop camera
-    camera->stop();
-    allocator->free(streamConfig->stream());
-    delete allocator;
-    camera->release();
-    camera.reset();
-    cm->stop();
-
-    return -1;  //For now
-}
 
 void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, std::atomic<bool> &stop_flag)
 {
@@ -339,19 +186,18 @@ int main(int argc, char **argv)
     while (rclcpp::ok()) 
     {
         static cv::Mat new_frame;
-        if (captureFrame(new_frame) < 0)
-            break;
 
-        // static cv::Mat prev_frame = new_frame.clone();
+        // TODO: Read new_frame from photographer
+
+        static cv::Mat prev_frame = new_frame.clone();
 
         // computeOpticalFlowFarneback(prev_frame, new_frame, stream_frame);
-        // computeOpticalFlowLK(prev_frame, new_frame, stream_frame);
+        computeOpticalFlowLK(prev_frame, new_frame, stream_frame);
 
-        // prev_frame = new_frame.clone();
+        prev_frame = new_frame.clone();
     }
 
     // Stop ROS
-    std::cout << "\n========================\n  Shutting down ROS...\n========================\n" << std::endl;
     rclcpp::shutdown();
 
     // Detener servidor
