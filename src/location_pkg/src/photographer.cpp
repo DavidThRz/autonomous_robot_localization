@@ -116,6 +116,7 @@ private:
 
     void publishImage();
 
+    cv::Mat img_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr publisher_;
 
     std::shared_ptr<Camera> camera_;
@@ -140,7 +141,6 @@ void Photographer::imageCaptured(Request *request)
     for (auto bufferPair : buffers)
     {
         FrameBuffer *buffer = bufferPair.second;
-        const FrameMetadata &metadata = buffer->metadata();
 
         if (buffer->planes().empty())
             continue;
@@ -156,23 +156,34 @@ void Photographer::imageCaptured(Request *request)
         int width  = bufferPair.first->configuration().size.width;
         int height = bufferPair.first->configuration().size.height;
 
-        cv::Mat img(height, width, CV_8UC3, mem);
-        cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
+        img_ = cv::Mat(height, width, CV_8UC3, mem);
+        cv::cvtColor(img_, img_, cv::COLOR_BGR2RGB);
 
-        std::ostringstream name;
-        name << "/home/davith/capturas/" << metadata.timestamp << ".jpg";
-        if (!cv::imwrite(name.str(), img)) 
-            std::cerr << "Error al guardar " << name.str() << std::endl;
-
-        munmap(mem, plane.length);
-
-        std::cout << "Guardada imagen: " << name.str() << std::endl;
-
-        //TODO: Publish image using ROS2
+        publishImage();
     }
 
     request->reuse(Request::ReuseBuffers);
     camera_->queueRequest(request);
+}
+
+void Photographer::publishImage()
+{
+    static sensor_msgs::msg::Image msg = sensor_msgs::msg::Image();
+   
+    msg.header.frame_id = "camera_frame";
+    msg.header.stamp = this->now();
+    
+    msg.height = img_.rows;
+    msg.width = img_.cols;
+    msg.encoding = "rgb8";
+    msg.is_bigendian = false;
+    msg.step = static_cast<sensor_msgs::msg::Image::_step_type>(img_.step);
+
+    size_t size = img_.step * img_.rows;
+    msg.data.resize(size);
+    memcpy(msg.data.data(), img_.data, size);
+
+    publisher_->publish(msg);
 }
 
 int main(int argc, char **argv)
