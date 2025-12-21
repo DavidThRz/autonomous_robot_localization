@@ -1,36 +1,22 @@
+/**
+ *  visual_odometry.cpp
+ *  Created on: November 30, 2025
+ *  
+ *  This file is part of the Autonomous Robot Localization 
+ *  project.
+ *  It receives images from the photographer and computes 
+ *  the position of the robot using visual odometry.
+ */
+ 
 #include "rclcpp/rclcpp.hpp"
 #include <opencv2/opencv.hpp>
+#include <sensor_msgs/msg/image.hpp>
+
 #include <httplib.h>
-#include <thread>
-#include <vector>
-#include <sstream>
-#include <atomic>
-#include <chrono>
 
-bool captureFrame(cv::Mat& frame)
-{
-    static cv::VideoCapture cap(0, cv::CAP_V4L2 );
-
-    if (!cap.isOpened()) 
-    {
-        std::cerr << "Camera could not be opened" << std::endl;
-        return false;
-    }
-
-    cap >> frame;
-
-    if (frame.empty()) 
-    {
-        std::cerr << "Failed to capture frame" << std::endl;
-        return false;
-    }
-
-    cvtColor(frame, frame, cv::COLOR_BGR2GRAY);
-
-    //TODO: Undistort image
-
-    return true;
-}
+// TODO: remove global variables
+cv::Mat global_img;
+bool new_image_available = false;
 
 void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, std::atomic<bool> &stop_flag)
 {
@@ -190,6 +176,15 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
     }
 }
 
+void imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+{
+    static cv::Mat gray_img;
+    gray_img = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
+
+    global_img = gray_img.clone();
+    new_image_available = true;
+}
+
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
@@ -201,12 +196,22 @@ int main(int argc, char **argv)
     std::atomic<bool> stop_flag(false);
     std::thread server_thread(start_stream_server, std::ref(stream_frame), std::ref(send_flag), std::ref(stop_flag));
 
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub = 
+     node->create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), imgCallback);
 
     while (rclcpp::ok()) 
     {
         static cv::Mat new_frame;
-        captureFrame(new_frame);
 
+        if (!new_image_available) 
+        {
+            rclcpp::spin_some(node);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+        new_image_available = false;
+
+        new_frame = global_img.clone();
         static cv::Mat prev_frame = new_frame.clone();
 
         // computeOpticalFlowFarneback(prev_frame, new_frame, stream_frame);
@@ -215,6 +220,7 @@ int main(int argc, char **argv)
         prev_frame = new_frame.clone();
     }
 
+    // Stop ROS
     rclcpp::shutdown();
 
     // Detener servidor
