@@ -34,12 +34,20 @@ install(TARGETS photographer_node
 
 # Visual odometry node
 add_executable(visual_node src/visual_odometry.cpp)
-target_link_libraries(visual_node PUBLIC
-  rclcpp::rclcpp
+ament_target_dependencies(visual_node
+  rclcpp
+  sensor_msgs
+)
+target_link_libraries(visual_node
   ${OpenCV_LIBRARIES}
 )
 install(TARGETS visual_node
   DESTINATION lib/${PROJECT_NAME})
+
+# Launchers
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
 
 # Exporta el paquete
 ament_package()

@@ -10,8 +10,13 @@
  
 #include "rclcpp/rclcpp.hpp"
 #include <opencv2/opencv.hpp>
+#include <sensor_msgs/msg/image.hpp>
 
 #include <httplib.h>
+
+// TODO: remove global variables
+cv::Mat global_img;
+bool new_image_available = false;
 
 void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, std::atomic<bool> &stop_flag)
 {
@@ -171,6 +176,20 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
     }
 }
 
+void imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+{
+    static cv::Mat img;
+    static cv::Mat gray_img;
+
+    img = cv::Mat(msg->height, msg->width, CV_8UC3, const_cast<uint8_t*>(msg->data.data()), msg->step);
+    cv::cvtColor(img, gray_img, cv::COLOR_RGB2GRAY);
+
+    global_img = gray_img.clone();
+    new_image_available = true;
+
+    // TODO: send through ROS topic only gray_img
+}
+
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
@@ -182,13 +201,22 @@ int main(int argc, char **argv)
     std::atomic<bool> stop_flag(false);
     std::thread server_thread(start_stream_server, std::ref(stream_frame), std::ref(send_flag), std::ref(stop_flag));
 
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub = 
+     node->create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), imgCallback);
 
     while (rclcpp::ok()) 
     {
         static cv::Mat new_frame;
 
-        // TODO: Read new_frame from photographer
+        if (!new_image_available) 
+        {
+            rclcpp::spin_some(node);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+        new_image_available = false;
 
+        new_frame = global_img.clone();
         static cv::Mat prev_frame = new_frame.clone();
 
         // computeOpticalFlowFarneback(prev_frame, new_frame, stream_frame);
