@@ -124,7 +124,6 @@ private:
     FrameBufferAllocator *allocator_;
     StreamConfiguration *streamConfig_;
     std::unique_ptr<CameraManager> cm_;
-
 };
 
 
@@ -157,7 +156,7 @@ void Photographer::imageCaptured(Request *request)
         int height = bufferPair.first->configuration().size.height;
 
         img_ = cv::Mat(height, width, CV_8UC3, mem);
-        cv::cvtColor(img_, img_, cv::COLOR_BGR2RGB);
+        cv::cvtColor(img_, img_, cv::COLOR_BGR2GRAY);
 
         publishImage();
     }
@@ -175,7 +174,7 @@ void Photographer::publishImage()
     
     msg.height = img_.rows;
     msg.width = img_.cols;
-    msg.encoding = "rgb8";
+    msg.encoding = "mono8";
     msg.is_bigendian = false;
     msg.step = static_cast<sensor_msgs::msg::Image::_step_type>(img_.step);
 

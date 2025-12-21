@@ -178,16 +178,11 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
 
 void imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
-    static cv::Mat img;
     static cv::Mat gray_img;
-
-    img = cv::Mat(msg->height, msg->width, CV_8UC3, const_cast<uint8_t*>(msg->data.data()), msg->step);
-    cv::cvtColor(img, gray_img, cv::COLOR_RGB2GRAY);
+    gray_img = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
 
     global_img = gray_img.clone();
     new_image_available = true;
-
-    // TODO: send through ROS topic only gray_img
 }
 
 int main(int argc, char **argv)
