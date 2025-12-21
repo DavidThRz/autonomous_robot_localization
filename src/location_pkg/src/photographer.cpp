@@ -11,6 +11,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include <opencv2/opencv.hpp>
+#include <sensor_msgs/msg/image.hpp>
 
 #include <libcamera/libcamera.h>
 #include <libcamera/framebuffer_allocator.h>
@@ -19,9 +20,114 @@
 
 using namespace libcamera;
 
-static std::shared_ptr<Camera> camera;
+class Photographer : public rclcpp::Node
+{
+public:
 
-static void requestComplete(Request *request)
+    Photographer() : Node("photographer_node")
+    {
+        rclcpp::QoS qos(rclcpp::KeepLast(1));
+        qos.best_effort();
+        qos.durability_volatile();
+
+        publisher_ =
+            create_publisher<sensor_msgs::msg::Image>("camera/image", qos);
+
+        // Camera confuration
+        cm_ = std::make_unique<CameraManager>();
+        std::unique_ptr<CameraConfiguration> config;
+        streamConfig_ = nullptr;
+
+        // Initialize camera
+        cm_->start();
+        auto cameras = cm_->cameras();
+        if (cameras.empty()) 
+        {
+            RCLCPP_ERROR(this->get_logger(), "No cameras were identified on the system");
+            cm_->stop();
+            rclcpp::shutdown();
+            return;
+        }
+
+        // Select first available camera
+        std::string camera_id = cm_->cameras()[0]->id();
+        camera_ = cm_->get(camera_id);
+        camera_->acquire();
+        RCLCPP_INFO(this->get_logger(), "Camera acquired: %s", camera_->id().c_str());
+
+        // Configure camera
+        config = camera_->generateConfiguration( { StreamRole::StillCapture } );  //This may affect performance, try StreamRole::Viewfinder or StreamRole::VideoRecording for better fps    
+        streamConfig_ = &config->at(0);
+        streamConfig_->size.width  = 1920;
+        streamConfig_->size.height = 1080;
+        streamConfig_->pixelFormat = libcamera::formats::BGR888;
+        RCLCPP_INFO(this->get_logger(), "Selected camera configuration: %s", streamConfig_->toString().c_str());
+        config->validate();
+        camera_->configure(config.get());
+
+        // Allocate buffers
+        allocator_ = new FrameBufferAllocator(camera_);
+        int ret = allocator_->allocate(streamConfig_->stream());
+        if (ret < 0) 
+        {
+            RCLCPP_ERROR(this->get_logger(), "Failed to allocate buffers");
+            return;
+        }
+
+        // Create request
+        static Stream *stream = streamConfig_->stream();
+        request_ = camera_->createRequest();
+        if (!request_)
+        {
+            RCLCPP_ERROR(this->get_logger(), "Failed to create request");
+            return;
+        }
+
+        const std::unique_ptr<FrameBuffer> &buffer = allocator_->buffers(stream)[0];
+        ret = request_->addBuffer(stream, buffer.get());
+        if (ret < 0)
+        {
+            RCLCPP_ERROR(this->get_logger(), "Failed to add buffer to request");
+            return;
+        }
+
+        // Connect callback
+        camera_->requestCompleted.connect(this, &Photographer::imageCaptured);
+
+        RCLCPP_INFO(this->get_logger(), "Starting camera");
+        camera_->start();
+        camera_->queueRequest(request_.get());
+    }
+
+    ~Photographer()
+    {
+        RCLCPP_INFO(this->get_logger(), "Stopping camera");
+        camera_->stop();
+        allocator_->free(streamConfig_->stream());
+        delete allocator_;
+        camera_->release();
+        camera_.reset();
+        cm_->stop();
+    }
+
+private:
+
+    void imageCaptured(Request *request);
+
+    void publishImage();
+
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr publisher_;
+
+    std::shared_ptr<Camera> camera_;
+    std::unique_ptr<Request> request_;
+    FrameBufferAllocator *allocator_;
+    StreamConfiguration *streamConfig_;
+    std::unique_ptr<CameraManager> cm_;
+
+};
+
+
+void Photographer::imageCaptured(Request *request)
 {
     if (request->status() == Request::RequestCancelled) 
     {
@@ -61,99 +167,18 @@ static void requestComplete(Request *request)
         munmap(mem, plane.length);
 
         std::cout << "Guardada imagen: " << name.str() << std::endl;
+
+        //TODO: Publish image using ROS2
     }
 
     request->reuse(Request::ReuseBuffers);
-    camera->queueRequest(request);
+    camera_->queueRequest(request);
 }
 
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    auto node = rclcpp::Node::make_shared("photographer_node");
-
-    // Variables to confugure camera
-    std::unique_ptr<CameraManager> cm = std::make_unique<CameraManager>();
-    std::unique_ptr<CameraConfiguration> config;
-    FrameBufferAllocator *allocator;
-    StreamConfiguration *streamConfig = nullptr;
-
-    // Initialize camera
-    cm->start();
-    auto cameras = cm->cameras();
-    if (cameras.empty()) 
-    {
-        std::cerr << "No cameras were identified on the system" << std::endl;
-        cm->stop();
-        rclcpp::shutdown();
-        return -1;
-    }
-
-    // Select first available camera
-    std::string camera_id = cm->cameras()[0]->id();
-    camera = cm->get(camera_id);
-    camera->acquire();
-    std::cout << "\nCamera acquired: " << camera->id() << std::endl;
-
-    // Configure camera
-    config = camera->generateConfiguration( { StreamRole::StillCapture } );  //This may affect performance, try StreamRole::Viewfinder or StreamRole::VideoRecording for better fps
-    streamConfig = &config->at(0);
-    streamConfig->size.width  = 1920;
-    streamConfig->size.height = 1080;
-    streamConfig->pixelFormat = libcamera::formats::BGR888;
-    std::cout << "\nSelected camera configuration: " << streamConfig->toString() << std::endl;
-    config->validate();
-    camera->configure(config.get());
-
-    // Allocate buffers
-    allocator = new FrameBufferAllocator(camera);
-    int ret = allocator->allocate(streamConfig->stream());
-    if (ret < 0) 
-    {
-        std::cerr << "Failed to allocate buffers" << std::endl;
-        return -2;
-    }
-
-    // Create request
-    static Stream *stream = streamConfig->stream();
-    std::unique_ptr<Request> request = camera->createRequest();
-    if (!request) 
-    {
-        std::cerr << "Failed to create request" << std::endl;
-        return -3;
-    }
-
-    const std::unique_ptr<FrameBuffer> &buffer = allocator->buffers(stream)[0];
-    ret = request->addBuffer(stream, buffer.get());
-    if (ret < 0) 
-    {
-        std::cerr << "Failed to add buffer to request" << std::endl;
-        return -5;
-    }
-
-
-    // Connect callback
-    camera->requestCompleted.connect(requestComplete);
-
-    std::cout << "\nStarting camera\n\n" << std::endl;
-    camera->start();
-    camera->queueRequest(request.get());
-
-    while (rclcpp::ok())
-    {
-
-    }
-
-    // Stop camera
-    camera->stop();
-    allocator->free(streamConfig->stream());
-    delete allocator;
-    camera->release();
-    camera.reset();
-    cm->stop();
-
-    // Stop ROS
+    rclcpp::spin(std::make_shared<Photographer>());
     rclcpp::shutdown();
-
     return 0;
 }

@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 # Include libraries
 include_directories(
@@ -19,8 +20,11 @@ include_directories(
 
 # Photographer node
 add_executable(photographer_node src/photographer.cpp)
-target_link_libraries(photographer_node PUBLIC
-  rclcpp::rclcpp
+ament_target_dependencies(photographer_node
+  rclcpp
+  sensor_msgs
+)
+target_link_libraries(photographer_node
   ${OpenCV_LIBRARIES}
   camera
   camera-base
