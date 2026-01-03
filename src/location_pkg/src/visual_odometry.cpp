@@ -12,74 +12,9 @@
 #include <opencv2/opencv.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
-#include <httplib.h>
-
 // TODO: remove global variables
 cv::Mat global_img;
 bool new_image_available = false;
-
-void start_stream_server(cv::Mat& stream_frame, std::atomic<bool> &send_flag, std::atomic<bool> &stop_flag)
-{
-    httplib::Server svr;
-
-    svr.Get("/stream", [&](const httplib::Request &, httplib::Response &res) 
-    {
-        res.set_content_provider
-        (
-            "multipart/x-mixed-replace; boundary=frame",
-            [&](size_t, httplib::DataSink &sink) 
-            {
-                while (!stop_flag) 
-                {
-                    if (!send_flag) 
-                    {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                        continue;
-                    }
-
-                    if (stream_frame.empty())
-                        continue;
-
-                    std::vector<uchar> buf;
-                    cv::imencode(".jpg", stream_frame, buf);
-
-                    std::ostringstream os;
-                    os << "--frame\r\n"
-                       << "Content-Type: image/jpeg\r\n\r\n";
-
-                    bool ok;
-                    ok = sink.write(os.str().c_str(), os.str().size());
-                    if (!ok) break;
-                    ok = sink.write(reinterpret_cast<const char *>(buf.data()), buf.size());
-                    if (!ok) break;
-                    ok = sink.write("\r\n", 2);
-                    if (!ok) break;
-
-                    std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS
-                }
-                std::cout << "Stream was closed" << std::endl;
-                return true;
-            });
-    });
-
-    rclcpp::on_shutdown([&]() 
-    {
-        svr.stop();
-        RCLCPP_INFO(rclcpp::get_logger("web_stream"), "Server stopped correctly.");
-    });
-
-    bool bind_result = svr.bind_to_port("0.0.0.0", 8080, 0.1);
-    if (!bind_result) 
-    {
-        RCLCPP_ERROR(rclcpp::get_logger("web_stream"), "No se pudo iniciar el servidor en el puerto 8080");
-        return;
-    }
-
-    RCLCPP_INFO(rclcpp::get_logger("web_stream"), "Servidor web en http://0.0.0.0:8080/stream");
-    
-    while (!stop_flag)
-        svr.listen_after_bind();
-}
 
 void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
 {
@@ -114,7 +49,7 @@ void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_
                                 poly_n, poly_sigma, cv::OPTFLOW_USE_INITIAL_FLOW );
 
 
-    flow = prev_frame.clone();
+    flow = curr_frame.clone();
 
     int step = 16;
     for (int y = 0; y < flow.rows; y += step)
@@ -163,7 +98,7 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
     std::vector<float> err;
     cv::calcOpticalFlowPyrLK(prev_frame, curr_frame, prev_pts, curr_pts, status, err);
 
-    flow = prev_frame.clone();
+    flow = curr_frame.clone();
     cv::cvtColor(flow, flow, cv::COLOR_GRAY2BGR);
 
     for (size_t i = 0; i < prev_pts.size(); ++i)
@@ -190,14 +125,11 @@ int main(int argc, char **argv)
     rclcpp::init(argc, argv);
     auto node = rclcpp::Node::make_shared("visual_odometry_node");
 
-    // Params for server
-    cv::Mat stream_frame;
-    std::atomic<bool> send_flag(true);
-    std::atomic<bool> stop_flag(false);
-    std::thread server_thread(start_stream_server, std::ref(stream_frame), std::ref(send_flag), std::ref(stop_flag));
-
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub = 
      node->create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), imgCallback);
+
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub =
+     node->create_publisher<sensor_msgs::msg::Image>("stream/image", 1);
 
     while (rclcpp::ok()) 
     {
@@ -214,19 +146,25 @@ int main(int argc, char **argv)
         new_frame = global_img.clone();
         static cv::Mat prev_frame = new_frame.clone();
 
+        static cv::Mat stream_frame;
         // computeOpticalFlowFarneback(prev_frame, new_frame, stream_frame);
         computeOpticalFlowLK(prev_frame, new_frame, stream_frame);
-
         prev_frame = new_frame.clone();
+
+        sensor_msgs::msg::Image stream_msg;
+        stream_msg.header.stamp = node->now();
+        stream_msg.header.frame_id = "camera";
+        stream_msg.height = stream_frame.rows;
+        stream_msg.width = stream_frame.cols;
+        stream_msg.encoding = "bgr8";
+        stream_msg.step = stream_frame.cols * 3;
+        stream_msg.data.assign(stream_frame.datastart, stream_frame.dataend);
+
+        img_pub->publish(stream_msg);
     }
 
     // Stop ROS
     rclcpp::shutdown();
-
-    // Detener servidor
-    stop_flag = true;
-    if (server_thread.joinable())
-        server_thread.join();
 
     return 0;
 }

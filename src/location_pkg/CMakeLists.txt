@@ -44,6 +44,18 @@ target_link_libraries(visual_node
 install(TARGETS visual_node
   DESTINATION lib/${PROJECT_NAME})
 
+# Streaming node
+add_executable(streaming_node src/streaming_node.cpp)
+ament_target_dependencies(streaming_node
+  rclcpp
+  sensor_msgs
+)
+target_link_libraries(streaming_node
+  ${OpenCV_LIBRARIES}
+)
+install(TARGETS streaming_node
+  DESTINATION lib/${PROJECT_NAME})
+
 # Launchers
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}

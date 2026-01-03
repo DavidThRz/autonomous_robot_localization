@@ -17,7 +17,15 @@ def generate_launch_description():
         output='screen'
     )
 
+    streaming_node = Node(
+        package='location_pkg',
+        executable='streaming_node',
+        name='streaming_node',
+        output='screen'
+    )
+
     return LaunchDescription([
         photographer_node,
-        visual_node
+        visual_node,
+        streaming_node
     ])
