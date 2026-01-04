@@ -19,8 +19,7 @@ std::atomic<bool> new_frame(false);
 void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     static cv::Mat gray_img;
-    // gray_img = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
-    gray_img = cv::Mat(msg->height, msg->width, CV_8UC3, const_cast<uint8_t*>(msg->data.data()), msg->step);
+    gray_img = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
 
     // cv::cvtColor(gray, stream_frame, cv::COLOR_GRAY2BGR);
     stream_frame = gray_img.clone();

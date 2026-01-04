@@ -24,7 +24,7 @@ public:
             create_publisher<sensor_msgs::msg::Image>("stream/image", 1);
 
         stream_msg_.header.frame_id = "camera_frame";
-        stream_msg_.encoding = "bgr8";
+        stream_msg_.encoding = "mono8";
     }
 
 private:
@@ -121,7 +121,6 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
     cv::calcOpticalFlowPyrLK(prev_frame, curr_frame, prev_pts, curr_pts, status, err);
 
     flow = curr_frame.clone();
-    cv::cvtColor(flow, flow, cv::COLOR_GRAY2BGR);
 
     for (size_t i = 0; i < prev_pts.size(); ++i)
     {
@@ -144,11 +143,10 @@ void Odometer::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     computeOpticalFlowLK(prev_frame, new_frame_, stream_frame);
     prev_frame = new_frame_.clone();
 
-    // TODO: enviar imagenes solo en blanco y negro
     stream_msg_.header.stamp = this->now();
     stream_msg_.height = stream_frame.rows;
     stream_msg_.width = stream_frame.cols;
-    stream_msg_.step = stream_frame.cols * 3;
+    stream_msg_.step = stream_frame.cols;
     stream_msg_.data.assign(stream_frame.datastart, stream_frame.dataend);
 
     img_pub_->publish(stream_msg_);
