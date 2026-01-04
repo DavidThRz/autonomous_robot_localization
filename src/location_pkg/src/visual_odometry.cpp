@@ -12,9 +12,31 @@
 #include <opencv2/opencv.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
-// TODO: remove global variables
-cv::Mat global_img;
-bool new_image_available = false;
+class Odometer : public rclcpp::Node
+{
+public:
+    Odometer() : Node("visual_estimator_node")
+    {
+        img_sub_ = 
+            create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), std::bind(&Odometer::imgCallback, this, std::placeholders::_1));
+
+        img_pub_ =
+            create_publisher<sensor_msgs::msg::Image>("stream/image", 1);
+
+        stream_msg_.header.frame_id = "camera_frame";
+        stream_msg_.encoding = "bgr8";
+    }
+
+private:
+
+    void imgCallback(const sensor_msgs::msg::Image::SharedPtr msg);
+    
+    cv::Mat new_frame_;
+    sensor_msgs::msg::Image stream_msg_;
+
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
+};
 
 void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
 {
@@ -111,59 +133,31 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
     }
 }
 
-void imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+void Odometer::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
-    static cv::Mat gray_img;
-    gray_img = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
+    new_frame_ = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
 
-    global_img = gray_img.clone();
-    new_image_available = true;
+    static cv::Mat prev_frame = new_frame_.clone();
+    static cv::Mat stream_frame;
+
+    // computeOpticalFlowFarneback(prev_frame, new_frame_, stream_frame);
+    computeOpticalFlowLK(prev_frame, new_frame_, stream_frame);
+    prev_frame = new_frame_.clone();
+
+    // TODO: enviar imagenes solo en blanco y negro
+    stream_msg_.header.stamp = this->now();
+    stream_msg_.height = stream_frame.rows;
+    stream_msg_.width = stream_frame.cols;
+    stream_msg_.step = stream_frame.cols * 3;
+    stream_msg_.data.assign(stream_frame.datastart, stream_frame.dataend);
+
+    img_pub_->publish(stream_msg_);
 }
 
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    auto node = rclcpp::Node::make_shared("visual_odometry_node");
-
-    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub = 
-     node->create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), imgCallback);
-
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub =
-     node->create_publisher<sensor_msgs::msg::Image>("stream/image", 1);
-
-    while (rclcpp::ok()) 
-    {
-        static cv::Mat new_frame;
-
-        if (!new_image_available) 
-        {
-            rclcpp::spin_some(node);
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
-        }
-        new_image_available = false;
-
-        new_frame = global_img.clone();
-        static cv::Mat prev_frame = new_frame.clone();
-
-        static cv::Mat stream_frame;
-        // computeOpticalFlowFarneback(prev_frame, new_frame, stream_frame);
-        computeOpticalFlowLK(prev_frame, new_frame, stream_frame);
-        prev_frame = new_frame.clone();
-
-        sensor_msgs::msg::Image stream_msg;
-        stream_msg.header.stamp = node->now();
-        stream_msg.header.frame_id = "camera";
-        stream_msg.height = stream_frame.rows;
-        stream_msg.width = stream_frame.cols;
-        stream_msg.encoding = "bgr8";
-        stream_msg.step = stream_frame.cols * 3;
-        stream_msg.data.assign(stream_frame.datastart, stream_frame.dataend);
-
-        img_pub->publish(stream_msg);
-    }
-
-    // Stop ROS
+    rclcpp::spin(std::make_shared<Odometer>());
     rclcpp::shutdown();
 
     return 0;
