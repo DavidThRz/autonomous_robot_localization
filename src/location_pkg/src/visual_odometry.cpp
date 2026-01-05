@@ -12,13 +12,13 @@
 #include <opencv2/opencv.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
-class Odometer : public rclcpp::Node
+class VisualNode : public rclcpp::Node
 {
 public:
-    Odometer() : Node("visual_estimator_node")
+    VisualNode() : Node("visual_estimator_node")
     {
         img_sub_ = 
-            create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), std::bind(&Odometer::imgCallback, this, std::placeholders::_1));
+            create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), std::bind(&VisualNode::imgCallback, this, std::placeholders::_1));
 
         img_pub_ =
             create_publisher<sensor_msgs::msg::Image>("stream/image", 1);
@@ -132,7 +132,7 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
     }
 }
 
-void Odometer::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     new_frame_ = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
 
@@ -155,7 +155,7 @@ void Odometer::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<Odometer>());
+    rclcpp::spin(std::make_shared<VisualNode>());
     rclcpp::shutdown();
 
     return 0;
