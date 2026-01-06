@@ -18,14 +18,18 @@ class VisualNode : public rclcpp::Node
 public:
     VisualNode() : Node("visual_estimator_node")
     {
+        rclcpp::QoS qos(3);
+        qos.reliable();
+        qos.durability_volatile();
+
         img_pub_ =
             create_publisher<sensor_msgs::msg::Image>("stream/image", 1);
         
         img_sub_ = 
-            create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), std::bind(&VisualNode::imgCallback, this, std::placeholders::_1));
+            create_subscription<sensor_msgs::msg::Image>("camera/image", qos, std::bind(&VisualNode::imgCallback, this, std::placeholders::_1));
         
         stream_status_sub_ = 
-            create_subscription<std_msgs::msg::Bool>("status/stream", rclcpp::SensorDataQoS(), std::bind(&VisualNode::streamStatusCallback, this, std::placeholders::_1));
+            create_subscription<std_msgs::msg::Bool>("status/stream", qos, std::bind(&VisualNode::streamStatusCallback, this, std::placeholders::_1));
 
 
         stream_msg_.header.frame_id = "camera_frame";
@@ -157,7 +161,7 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
     if (stream_status_active_)
     {
-        stream_msg_.header.stamp = this->now();
+        stream_msg_.header.stamp = msg->header.stamp;
         stream_msg_.height = stream_frame.rows;
         stream_msg_.width = stream_frame.cols;
         stream_msg_.step = stream_frame.cols;

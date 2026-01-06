@@ -25,8 +25,11 @@ public:
     
     StreamingNode() : Node("streaming_node"), stop_flag_(false), new_frame_(false)
     {
+rclcpp::QoS qos(3);
+        qos.reliable();
+        qos.durability_volatile();
 
-        image_sub_ = create_subscription<sensor_msgs::msg::Image>("stream/image", rclcpp::SensorDataQoS(), std::bind(&StreamingNode::imgCallback, this, _1));
+        image_sub_ = create_subscription<sensor_msgs::msg::Image>("stream/image", qos, std::bind(&StreamingNode::imgCallback, this, _1));
 
         stream_status_pub_ = create_publisher<std_msgs::msg::Bool>("status/stream", 1);
 

@@ -26,8 +26,8 @@ public:
 
     Photographer() : Node("photographer_node")
     {
-        rclcpp::QoS qos(rclcpp::KeepLast(1));
-        qos.best_effort();
+        rclcpp::QoS qos(rclcpp::KeepLast(3));
+        qos.reliable();
         qos.durability_volatile();
 
         publisher_ =
@@ -114,7 +114,7 @@ private:
 
     void imageCaptured(Request *request);
 
-    void publishImage();
+    void publishImage(rclcpp::Time img_stamp);
 
     cv::Mat img_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr publisher_;
@@ -133,6 +133,14 @@ void Photographer::imageCaptured(Request *request)
     {
         std::cerr << "\nRequest was cancelled" << std::endl;
         return;
+    }
+
+    const auto &metadata = request->metadata();
+    rclcpp::Time img_stamp;
+    if (auto ts_opt = metadata.get(libcamera::controls::SensorTimestamp))
+    {
+        int64_t ts_ns = *ts_opt;
+        img_stamp = rclcpp::Time(ts_ns);
     }
 
     // Save buffers
@@ -158,19 +166,19 @@ void Photographer::imageCaptured(Request *request)
         img_ = cv::Mat(height, width, CV_8UC3, mem);
         cv::cvtColor(img_, img_, cv::COLOR_BGR2GRAY);
 
-        publishImage();
+        publishImage(img_stamp);
     }
 
     request->reuse(Request::ReuseBuffers);
     camera_->queueRequest(request);
 }
 
-void Photographer::publishImage()
+void Photographer::publishImage(rclcpp::Time img_stamp)
 {
     static sensor_msgs::msg::Image msg = sensor_msgs::msg::Image();
    
     msg.header.frame_id = "camera_frame";
-    msg.header.stamp = this->now();
+    msg.header.stamp = img_stamp;
     
     msg.height = img_.rows;
     msg.width = img_.cols;
