@@ -58,8 +58,8 @@ public:
         // Configure camera
         config = camera_->generateConfiguration( { StreamRole::StillCapture } );  //This may affect performance, try StreamRole::Viewfinder or StreamRole::VideoRecording for better fps    
         streamConfig_ = &config->at(0);
-        streamConfig_->size.width  = 1920;
-        streamConfig_->size.height = 1080;
+        streamConfig_->size.width  = 1024; // 1920;
+        streamConfig_->size.height = 768; // 1080;
         streamConfig_->pixelFormat = libcamera::formats::BGR888;
         RCLCPP_INFO(this->get_logger(), "Selected camera configuration: %s", streamConfig_->toString().c_str());
         config->validate();
