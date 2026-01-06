@@ -11,31 +11,43 @@
 #include "rclcpp/rclcpp.hpp"
 #include <opencv2/opencv.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 class VisualNode : public rclcpp::Node
 {
 public:
     VisualNode() : Node("visual_estimator_node")
     {
-        img_sub_ = 
-            create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), std::bind(&VisualNode::imgCallback, this, std::placeholders::_1));
-
         img_pub_ =
             create_publisher<sensor_msgs::msg::Image>("stream/image", 1);
+        
+        img_sub_ = 
+            create_subscription<sensor_msgs::msg::Image>("camera/image", rclcpp::SensorDataQoS(), std::bind(&VisualNode::imgCallback, this, std::placeholders::_1));
+        
+        stream_status_sub_ = 
+            create_subscription<std_msgs::msg::Bool>("status/stream", rclcpp::SensorDataQoS(), std::bind(&VisualNode::streamStatusCallback, this, std::placeholders::_1));
+
 
         stream_msg_.header.frame_id = "camera_frame";
         stream_msg_.encoding = "mono8";
+        stream_status_active_ = false;
     }
 
 private:
 
     void imgCallback(const sensor_msgs::msg::Image::SharedPtr msg);
+
+    void streamStatusCallback(const std_msgs::msg::Bool::SharedPtr msg);
     
     cv::Mat new_frame_;
     sensor_msgs::msg::Image stream_msg_;
+    bool stream_status_active_;
+
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stream_status_sub_;
+
 };
 
 void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, cv::Mat& flow)
@@ -143,13 +155,21 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     computeOpticalFlowLK(prev_frame, new_frame_, stream_frame);
     prev_frame = new_frame_.clone();
 
-    stream_msg_.header.stamp = this->now();
-    stream_msg_.height = stream_frame.rows;
-    stream_msg_.width = stream_frame.cols;
-    stream_msg_.step = stream_frame.cols;
-    stream_msg_.data.assign(stream_frame.datastart, stream_frame.dataend);
+    if (stream_status_active_)
+    {
+        stream_msg_.header.stamp = this->now();
+        stream_msg_.height = stream_frame.rows;
+        stream_msg_.width = stream_frame.cols;
+        stream_msg_.step = stream_frame.cols;
+        stream_msg_.data.assign(stream_frame.datastart, stream_frame.dataend);
 
-    img_pub_->publish(stream_msg_);
+        img_pub_->publish(stream_msg_);
+    }
+}
+
+void VisualNode::streamStatusCallback(const std_msgs::msg::Bool::SharedPtr msg)
+{
+    stream_status_active_ = msg->data;
 }
 
 int main(int argc, char **argv)

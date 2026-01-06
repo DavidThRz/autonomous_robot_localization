@@ -10,9 +10,14 @@
 #include "rclcpp/rclcpp.hpp"
 #include <opencv2/opencv.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <std_msgs/msg/bool.hpp>
+
 
 #include <httplib.h>
 #include <mutex>
+
+using std::placeholders::_1;
+using std::placeholders::_2;
 
 class StreamingNode : public rclcpp::Node
 {
@@ -20,9 +25,10 @@ public:
     
     StreamingNode() : Node("streaming_node"), stop_flag_(false), new_frame_(false)
     {
-        using std::placeholders::_1;
 
         image_sub_ = create_subscription<sensor_msgs::msg::Image>("stream/image", rclcpp::SensorDataQoS(), std::bind(&StreamingNode::imgCallback, this, _1));
+
+        stream_status_pub_ = create_publisher<std_msgs::msg::Bool>("status/stream", 1);
 
         server_thread_ = std::thread(&StreamingNode::streamServer, this);
 
@@ -38,6 +44,8 @@ public:
 
 private:
 
+    void publishStreamStatus(bool connected);
+
     void imgCallback(const sensor_msgs::msg::Image::SharedPtr msg);
 
     void streamServer();
@@ -45,6 +53,8 @@ private:
     void handleStream(const httplib::Request&, httplib::Response& res);
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
+
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr stream_status_pub_;
 
     cv::Mat stream_frame_;
     std::mutex frame_mutex_;
@@ -54,6 +64,13 @@ private:
 
     std::thread server_thread_;
 };
+
+void StreamingNode::publishStreamStatus(bool connected)
+{
+    std_msgs::msg::Bool msg;
+    msg.data = connected;
+    stream_status_pub_->publish(msg);
+}
 
 void StreamingNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
@@ -70,7 +87,7 @@ void StreamingNode::streamServer()
 {
     httplib::Server svr;
 
-    svr.Get("/stream", std::bind(&StreamingNode::handleStream, this, std::placeholders::_1, std::placeholders::_2));
+    svr.Get("/stream", std::bind(&StreamingNode::handleStream, this, _1, _2));
 
     if (!svr.bind_to_port("0.0.0.0", 8080, 0.1))
     {
@@ -94,6 +111,8 @@ void StreamingNode::handleStream(const httplib::Request&, httplib::Response& res
     "multipart/x-mixed-replace; boundary=frame",
     [&](size_t, httplib::DataSink& sink)
     {
+        publishStreamStatus(true);
+        
         while(!stop_flag_)
         {
             //TODO: evitar dormir el thread
@@ -126,7 +145,8 @@ void StreamingNode::handleStream(const httplib::Request&, httplib::Response& res
             if (!sink.write("\r\n", 2)) break;
         }
 
-        RCLCPP_INFO(this->get_logger(), "Client disconnected from stream");
+        publishStreamStatus(false);
+
         return true;
     });
 }
