@@ -12,7 +12,6 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/bool.hpp>
 
-
 #include <httplib.h>
 #include <mutex>
 
@@ -25,7 +24,7 @@ public:
     
     StreamingNode() : Node("streaming_node"), stop_flag_(false), new_frame_(false)
     {
-rclcpp::QoS qos(3);
+        rclcpp::QoS qos(3);
         qos.reliable();
         qos.durability_volatile();
 

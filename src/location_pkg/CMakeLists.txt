@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 # Include libraries
 include_directories(
@@ -37,6 +38,7 @@ add_executable(visual_node src/visual_odometry.cpp)
 ament_target_dependencies(visual_node
   rclcpp
   sensor_msgs
+  geometry_msgs
 )
 target_link_libraries(visual_node
   ${OpenCV_LIBRARIES}
