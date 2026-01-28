@@ -58,6 +58,19 @@ target_link_libraries(streaming_node
 install(TARGETS streaming_node
   DESTINATION lib/${PROJECT_NAME})
 
+# Mapper node
+add_executable(mapper_node src/mapper.cpp)
+ament_target_dependencies(mapper_node
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+)
+target_link_libraries(mapper_node
+  ${OpenCV_LIBRARIES}
+)
+install(TARGETS mapper_node
+  DESTINATION lib/${PROJECT_NAME})
+
 # Launchers
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}

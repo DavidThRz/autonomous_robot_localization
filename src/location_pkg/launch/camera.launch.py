@@ -24,8 +24,16 @@ def generate_launch_description():
         output='screen'
     )
 
+    mapper_node = Node(
+        package='location_pkg',
+        executable='mapper_node',
+        name='mapper_node',
+        output='screen'
+    )
+
     return LaunchDescription([
         photographer_node,
         visual_node,
-        streaming_node
+        streaming_node,
+        mapper_node
     ])

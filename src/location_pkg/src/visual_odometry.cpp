@@ -34,7 +34,7 @@ public:
             create_publisher<sensor_msgs::msg::Image>("stream/image", 1);
 
         pose_pub_ =
-            create_publisher<geometry_msgs::msg::PoseStamped >("odometry/position", 10);
+            create_publisher<geometry_msgs::msg::PoseStamped>("odometry/position", 10);
         
         img_sub_ = 
             create_subscription<sensor_msgs::msg::Image>("camera/image", qos, std::bind(&VisualNode::imgCallback, this, std::placeholders::_1));
