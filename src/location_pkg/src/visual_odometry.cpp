@@ -50,9 +50,15 @@ public:
 
 private:
 
+    void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow);
+
+    void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow);
+
     void imgCallback(const sensor_msgs::msg::Image::SharedPtr msg);
 
     void streamStatusCallback(const std_msgs::msg::Bool::SharedPtr msg);
+
+    void removeOutliers(std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts);
     
     cv::Mat new_frame_;
     sensor_msgs::msg::Image stream_msg_;
@@ -66,7 +72,7 @@ private:
 
 };
 
-void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow)
+void VisualNode::computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow)
 {
     //pyr_scale: factor de escala entre pirámides (0 < pyr_scale < 1)
     static const float pyr_scale = 0.5;
@@ -118,7 +124,7 @@ void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_
     }
 }
 
-void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow)
+void VisualNode::computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow)
 {
     // maxCorners: número máximo de esquinas a detectar
     static const int maxCorners = 100;
@@ -150,6 +156,8 @@ void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, 
 
     flow = curr_frame.clone();
 
+    removeOutliers(prev_pts, curr_pts);
+
     for (size_t i = 0; i < prev_pts.size(); ++i)
     {
         if (status[i])
@@ -176,7 +184,6 @@ static state_space_t computeVelocity(const std::vector<cv::Point2f>& prev_pts, c
     mass_center_curr *= (1.0f / curr_pts.size());
     cv::Point2f velocity = mass_center_curr - mass_center_prev;
 
-    // double angle = std::atan2(velocity.y, velocity.x) * 180.0 / CV_PI;
     double yaw_velocity = 0;
     std::vector<cv::Mat> vector_prev, vector_curr;
     for (size_t i = 0; i < prev_pts.size(); ++i) 
@@ -251,6 +258,61 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 void VisualNode::streamStatusCallback(const std_msgs::msg::Bool::SharedPtr msg)
 {
     stream_status_active_ = msg->data;
+}
+
+void VisualNode::removeOutliers(std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts)
+{
+    if (prev_pts.size() != curr_pts.size() || prev_pts.empty())
+        return;
+
+    const size_t n = prev_pts.size();
+    std::vector<float> magnitudes(n);
+    std::vector<float> angles(n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const cv::Point2f diff = curr_pts[i] - prev_pts[i];
+        magnitudes[i] = std::hypot(diff.x, diff.y);
+        angles[i] = std::atan2(diff.y, diff.x) * 180.0 / CV_PI;
+    }
+    
+    auto filterData = [&](std::vector<float>&values, float threshold)
+    {
+        const size_t m = values.size();
+
+        float mean = 0.0f;
+        for (float v : values)
+            mean += v;
+        mean /= static_cast<float>(m);
+
+        float variance = 0.0f;
+        for (float v : values)
+            variance += (v - mean) * (v - mean);
+        variance /= static_cast<float>(m);
+        float std_dev = std::sqrt(variance);
+
+        size_t write_idx = 0;
+        for (size_t i = 0; i < values.size(); ++i)
+        {
+            if (std::abs(values[i] - mean) <= threshold * std_dev)
+            {
+                prev_pts[write_idx]  = prev_pts[i];
+                curr_pts[write_idx]  = curr_pts[i];
+                magnitudes[write_idx] = magnitudes[i];
+                angles[write_idx]     = angles[i];
+                values[write_idx]     = values[i];
+                ++write_idx;
+            }
+        }
+        prev_pts.resize(write_idx);
+        curr_pts.resize(write_idx);
+        magnitudes.resize(write_idx);
+        angles.resize(write_idx);
+        values.resize(write_idx);
+    };
+
+    filterData(magnitudes, 1.5f);
+    filterData(angles, 1.0f);
 }
 
 int main(int argc, char **argv)
