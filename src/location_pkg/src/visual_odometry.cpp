@@ -50,9 +50,9 @@ public:
 
 private:
 
-    void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow);
+    void computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts);
 
-    void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow);
+    void computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts);
 
     void imgCallback(const sensor_msgs::msg::Image::SharedPtr msg);
 
@@ -72,7 +72,7 @@ private:
 
 };
 
-void VisualNode::computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow)
+void VisualNode::computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts)
 {
     //pyr_scale: factor de escala entre pirámides (0 < pyr_scale < 1)
     static const float pyr_scale = 0.5;
@@ -105,12 +105,10 @@ void VisualNode::computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv
                                 poly_n, poly_sigma, cv::OPTFLOW_USE_INITIAL_FLOW );
 
 
-    flow = curr_frame.clone();
-
     int step = 16;
-    for (int y = 0; y < flow.rows; y += step)
+    for (int y = 0; y < curr_frame.rows; y += step)
     {
-        for (int x = 0; x < flow.cols; x += step)
+        for (int x = 0; x < curr_frame.cols; x += step)
         {
             const cv::Point2f& fxy = flow_xy.at<cv::Point2f>(y, x);
             cv::Point p1(x, y);
@@ -118,13 +116,11 @@ void VisualNode::computeOpticalFlowFarneback(const cv::Mat& prev_frame, const cv
 
             prev_pts.push_back(p1);
             curr_pts.push_back(p2);            
-            
-            cv::arrowedLine(flow, p1, p2, cv::Scalar(0, 255, 0), 1, cv::LINE_AA, 0, 0.3);
         }
     }
 }
 
-void VisualNode::computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts, cv::Mat& flow)
+void VisualNode::computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& curr_frame, std::vector<cv::Point2f>& prev_pts, std::vector<cv::Point2f>& curr_pts)
 {
     // maxCorners: número máximo de esquinas a detectar
     static const int maxCorners = 100;
@@ -133,6 +129,11 @@ void VisualNode::computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& 
     // minDistance: distancia mínima entre esquinas detectadas
     static const double minDistance = 10.0;
 
+    static const cv::Size winSize(21, 21);
+    static const int      maxLevel = 3;
+    static const cv::TermCriteria termCrit(
+        cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 30, 0.01);
+    
     if (prev_frame.empty()) 
     {
         std::cerr << "Previous frame is empty" << std::endl;
@@ -152,20 +153,20 @@ void VisualNode::computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& 
 
     std::vector<uchar> status;
     std::vector<float> err;
-    cv::calcOpticalFlowPyrLK(prev_frame, curr_frame, prev_pts, curr_pts, status, err);
+    cv::calcOpticalFlowPyrLK(prev_frame, curr_frame, prev_pts, curr_pts, status, err, winSize, maxLevel, termCrit);
 
-    flow = curr_frame.clone();
-
-    removeOutliers(prev_pts, curr_pts);
-
-    for (size_t i = 0; i < prev_pts.size(); ++i)
+    size_t write = 0;
+    for (size_t i = 0; i < status.size(); ++i)
     {
         if (status[i])
         {
-            cv::arrowedLine(flow, prev_pts[i], curr_pts[i], cv::Scalar(0, 0, 255), 2, cv::LINE_AA, 0, 0.3);
-            cv::circle(flow, curr_pts[i], 2, cv::Scalar(0, 255, 0), -1);
+            prev_pts[write] = prev_pts[i];
+            curr_pts[write] = curr_pts[i];
+            ++write;
         }
     }
+    prev_pts.resize(write);
+    curr_pts.resize(write);
 }
 
 static state_space_t computeVelocity(const std::vector<cv::Point2f>& prev_pts, const std::vector<cv::Point2f>& curr_pts)
@@ -215,12 +216,20 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     new_frame_ = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
 
     static cv::Mat prev_frame = new_frame_.clone();
-    static cv::Mat stream_frame;
     std::vector<cv::Point2f> prev_pts, curr_pts;
 
-    // computeOpticalFlowFarneback(prev_frame, new_frame_, prev_pts, curr_pts, stream_frame);
-    computeOpticalFlowLK(prev_frame, new_frame_, prev_pts, curr_pts, stream_frame);
+    // computeOpticalFlowFarneback(prev_frame, new_frame_, prev_pts, curr_pts);
+    computeOpticalFlowLK(prev_frame, new_frame_, prev_pts, curr_pts);
     prev_frame = new_frame_.clone();
+
+    removeOutliers(prev_pts, curr_pts);
+
+    /* Paint frame to stream */
+    for (size_t i = 0; i < prev_pts.size(); ++i)
+    {
+        cv::arrowedLine(new_frame_, prev_pts[i], curr_pts[i], cv::Scalar(0, 0, 255), 2, cv::LINE_AA, 0, 0.3);
+        cv::circle(new_frame_, curr_pts[i], 2, cv::Scalar(0, 255, 0), -1);
+    }
 
     state_space_t vel = computeVelocity(prev_pts, curr_pts);
     static state_space_t position = {0.0, 0.0, 0.0};
@@ -246,10 +255,10 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     if (stream_status_active_)
     {
         stream_msg_.header.stamp = msg->header.stamp;
-        stream_msg_.height = stream_frame.rows;
-        stream_msg_.width = stream_frame.cols;
-        stream_msg_.step = stream_frame.cols;
-        stream_msg_.data.assign(stream_frame.datastart, stream_frame.dataend);
+        stream_msg_.height = new_frame_.rows;
+        stream_msg_.width = new_frame_.cols;
+        stream_msg_.step = new_frame_.cols;
+        stream_msg_.data.assign(new_frame_.datastart, new_frame_.dataend);
 
         img_pub_->publish(stream_msg_);
     }
