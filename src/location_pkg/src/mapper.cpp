@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <cmath>
 #include <filesystem>
+#include <opencv2/opencv.hpp>
 
 namespace fs = std::filesystem;
 using std::placeholders::_1;
@@ -24,8 +25,8 @@ public:
             RCLCPP_INFO(this->get_logger(), "Created directory: %s", data_dir.string().c_str());
         }
 
-        fs::path filepath = data_dir / filename;
-        if (fs::exists(filepath))
+        file_path_ = data_dir / filename;
+        if (fs::exists(file_path_))
         {
             auto now = std::chrono::system_clock::now();
             auto timestamp = 
@@ -35,14 +36,14 @@ public:
                                      + "_" + std::to_string(timestamp) + ".csv";
             fs::path old_filepath = data_dir / old_filename;
             
-            fs::rename(filepath, old_filepath);
+            fs::rename(file_path_, old_filepath);
             RCLCPP_INFO(this->get_logger(), "Existing file renamed to: %s", old_filepath.string().c_str());
         }
 
-        csv_file_.open(filepath, std::ios::out);
+        csv_file_.open(file_path_, std::ios::out);
         if (!csv_file_.is_open())
         {
-            RCLCPP_ERROR(this->get_logger(), "Failed to open CSV file: %s", filepath.c_str());
+            RCLCPP_ERROR(this->get_logger(), "Failed to open CSV file: %s", file_path_.c_str());
             rclcpp::shutdown();
             return;
         }
@@ -52,7 +53,7 @@ public:
         pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
             "odometry/position", 10, std::bind(&MapperNode::poseCallback, this, _1));
 
-        RCLCPP_INFO(this->get_logger(), "Mapper node started - Logging to: %s", filepath.c_str());
+        RCLCPP_INFO(this->get_logger(), "Mapper node started - Logging to: %s", file_path_.c_str());
     }
 
     ~MapperNode()
@@ -61,15 +62,19 @@ public:
         {
             csv_file_.close();
             RCLCPP_INFO(this->get_logger(), "CSV file closed. Total poses logged: %zu", pose_count_);
+
+            generateMap();
         }
     }
 
 private:
     void poseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+    void generateMap();
 
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
     std::ofstream csv_file_;
     size_t pose_count_{0};
+    fs::path file_path_;
 };
 
 void MapperNode::poseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
@@ -88,7 +93,7 @@ void MapperNode::poseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr m
     double qw = msg->pose.orientation.w;
 
     // Convertir quaternion a yaw (rotación en Z)
-    double theta = std::atan2(2.0 * (qw * qz + qx * qy),
+    double theta = std::atan2(2.0 * (qw * qz + qx * qy),    //TODO: revisar fórmula
                                 1.0 - 2.0 * (qy * qy + qz * qz));
 
     // Escribir al CSV
@@ -105,6 +110,214 @@ void MapperNode::poseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr m
     {
         RCLCPP_INFO(this->get_logger(), "Logged %zu poses", pose_count_);
     }
+}
+
+struct Pose {
+    double timestamp;
+    double x;
+    double y;
+    double theta;
+};
+
+void MapperNode::generateMap()
+{
+    /* Map allignment design */
+    constexpr int IMG_SIZE = 1000;
+    constexpr int margin_right = 50;
+    constexpr int margin_top = 100;
+    constexpr int margin_left = 110;
+    constexpr int margin_bottom = 65;
+    constexpr int title_space = margin_top - 20;
+    const int drawable_x = IMG_SIZE - margin_left - margin_right;
+    const int drawable_y = IMG_SIZE - margin_top - margin_bottom;
+
+    /* Read poses from .csv */
+    std::ifstream in_file(file_path_.string());
+    std::vector<Pose> poses;
+    Pose pose;
+    std::cout << "Generating map from logged poses..." << std::endl;
+
+    std::string line;
+    while (std::getline(in_file, line))
+    {
+        if (line.empty()) continue;
+
+        std::stringstream ss(line);
+        std::string token;
+
+        try
+        {
+            std::getline(ss, token, ','); pose.timestamp = std::stod(token);
+            std::getline(ss, token, ','); pose.x         = std::stod(token);
+            std::getline(ss, token, ','); pose.y         = std::stod(token);
+            std::getline(ss, token, ','); pose.theta     = std::stod(token);
+            poses.push_back(pose);
+        }
+        catch (const std::exception& e)
+        {
+            continue;
+        }
+    }
+
+    if (poses.empty())
+    {
+        RCLCPP_WARN(this->get_logger(), "No poses to generate map.");
+        return;
+    }
+
+    /* Calculate limits */
+    double min_x = poses[0].x, max_x = poses[0].x;
+    double min_y = poses[0].y, max_y = poses[0].y;
+    double duration = poses.back().timestamp - poses.front().timestamp;
+    double total_distance = 0.0;
+
+    for (size_t i = 1; i < poses.size(); ++i)
+    {
+        min_x = std::min(min_x, poses[i].x);
+        max_x = std::max(max_x, poses[i].x);
+        min_y = std::min(min_y, poses[i].y);
+        max_y = std::max(max_y, poses[i].y);
+
+        double dx = poses[i].x - poses[i-1].x;
+        double dy = poses[i].y - poses[i-1].y;
+        total_distance += std::hypot(dx, dy);
+    }
+
+    const double range_x = max_x - min_x;
+    const double range_y = max_y - min_y;
+
+    const double off_x = (range_x > range_y) ? 0.0 : (range_y - range_x) / 2.0;
+    const double off_y = (range_x > range_y) ? (range_x - range_y) / 2.0 : 0.0;
+    const double scale = (range_x > range_y) ? range_x : range_y;
+
+    std::cout << "======= RESUMEN DE TRAYECTORIA =======" << std::endl;
+    std::cout << "  Poses totales   : " << poses.size()                          << std::endl;
+    std::cout << "  Duración        : " << duration       << " s"                << std::endl;
+    std::cout << "  Distancia total : " << total_distance << " px"                << std::endl;
+    std::cout << "  Rango X         : [" << min_x << ", " << max_x << "] px"      << std::endl;
+    std::cout << "  Rango Y         : [" << min_y << ", " << max_y << "] px"      << std::endl;
+    std::cout << "  Pose final      : (" << poses.back().x  << ", "
+                                         << poses.back().y  << ") θ="
+                                         << poses.back().theta  << " rad"        << std::endl;
+    std::cout << "======================================" << std::endl;
+
+    /* Prepare canvas */
+    cv::Mat img(IMG_SIZE, IMG_SIZE, CV_8UC3, cv::Scalar(255, 255, 255));
+    
+    auto toPixel = [&](double x, double y) -> cv::Point 
+    {
+        int px = static_cast<int>(margin_left + (x - min_x + off_x) / scale * drawable_x);
+        int py = static_cast<int>(IMG_SIZE - margin_bottom - (y - min_y + off_y) / scale * drawable_y);
+        return {px, py};
+    };
+
+    /* Draw grid */
+    const int num_divisions = 10;
+
+    cv::Scalar grid_color(220, 220, 220);
+    for (int i = 0; i <= num_divisions; ++i) 
+    {
+        int offset_x = margin_left + i * drawable_x / num_divisions;
+        int offset_y = margin_top + i * drawable_y / num_divisions;
+
+        cv::line(img, {offset_x, margin_top}, {offset_x, IMG_SIZE - margin_bottom}, grid_color, 1);
+        cv::line(img, {margin_left, offset_y}, {IMG_SIZE - margin_right, offset_y}, grid_color, 1);
+
+        double world_x = min_x + (double)i / num_divisions * scale - off_x;
+        std::ostringstream label_x;
+        label_x << std::fixed << std::setprecision(3) << world_x << "px";
+        cv::putText(img, label_x.str(),
+                    {offset_x - 18, IMG_SIZE - margin_bottom + 20},
+                    cv::FONT_HERSHEY_SIMPLEX, 0.35, {80, 80, 80}, 1, cv::LINE_AA);
+
+        double world_y = min_y + (1.0 - (double)i / num_divisions) * scale - off_y;
+        std::ostringstream label_y;
+        label_y << std::fixed << std::setprecision(3) << world_y << "px";
+        cv::putText(img, label_y.str(),
+                    {40, offset_y + 4},
+                    cv::FONT_HERSHEY_SIMPLEX, 0.35, {80, 80, 80}, 1, cv::LINE_AA);
+    }
+
+    int px_0 = static_cast<int>(margin_left - min_x / scale * drawable_x + off_x / scale * drawable_x);
+    int py_0 = static_cast<int>(IMG_SIZE - margin_bottom + min_y / scale * drawable_y - off_y / scale * drawable_y);
+    cv::line(img, {px_0, margin_top}, {px_0, IMG_SIZE - margin_bottom}, grid_color, 2);
+    cv::line(img, {margin_left, py_0}, {IMG_SIZE - margin_right, py_0}, grid_color, 2);
+
+    cv::rectangle(img, 
+                {margin_left, margin_top}, {IMG_SIZE - margin_right, IMG_SIZE - margin_bottom},
+                cv::Scalar(150, 150, 150), 1);
+
+    cv::putText(img, "X (px)", {IMG_SIZE / 2 - 15, IMG_SIZE - 17},
+                cv::FONT_HERSHEY_SIMPLEX, 0.5, {50, 50, 50}, 1, cv::LINE_AA);
+
+    cv::Mat y_label(30, 60, CV_8UC3, cv::Scalar(255, 255, 255));
+    cv::putText(y_label, "Y (px)", {0, 20},
+                cv::FONT_HERSHEY_SIMPLEX, 0.5, {50, 50, 50}, 1, cv::LINE_AA);
+    cv::Mat y_rotated;
+    cv::rotate(y_label, y_rotated, cv::ROTATE_90_COUNTERCLOCKWISE);
+    y_rotated.copyTo(img(cv::Rect(0, IMG_SIZE / 2 - 30, y_rotated.cols, y_rotated.rows)));
+
+    /* Trayectory */
+    double t0 = poses.front().timestamp;
+    double t1 = poses.back().timestamp;
+    double dt = (t1 - t0) < 1e-6 ? 1.0 : (t1 - t0);
+
+    for (size_t i = 1; i < poses.size(); ++i) 
+    {
+        double t = (poses[i].timestamp - t0) / dt;
+        cv::Scalar color(
+            255 * (1.0 - t),
+            80,
+            255 * t
+        );
+        cv::line(img, toPixel(poses[i-1].x, poses[i-1].y),
+                      toPixel(poses[i].x,   poses[i].y),
+                      color, 2, cv::LINE_AA);
+    }
+
+    /* Orientation */
+    const int arrow_step = std::max(1, static_cast<int>(poses.size()) / 80);
+    const double arrow_len = scale * 0.03;
+
+    for (size_t i = 0; i < poses.size(); i += arrow_step) 
+    {
+        cv::Point base = toPixel(poses[i].x, poses[i].y);
+        cv::Point tip  = toPixel(poses[i].x + arrow_len * std::cos(poses[i].theta),
+                                 poses[i].y + arrow_len * std::sin(poses[i].theta));
+        cv::arrowedLine(img, base, tip, cv::Scalar(0, 140, 255), 1, cv::LINE_AA, 0, 0.3);
+    }
+
+    /* Init and end poses */
+    cv::circle(img, toPixel(poses.front().x, poses.front().y), 8, cv::Scalar(200, 0, 0),  -1, cv::LINE_AA);
+    cv::circle(img, toPixel(poses.back().x,  poses.back().y),  8, cv::Scalar(0, 0, 200),  -1, cv::LINE_AA);
+
+    /* Legend */
+    const int bar_y = title_space / 2;
+    const int legend_init_x = IMG_SIZE - 220;
+    const int legend_end_x = legend_init_x + 80;
+
+    cv::rectangle(img, {0, 0}, {IMG_SIZE, title_space},
+            cv::Scalar(235, 235, 205), -1);
+    cv::line(img, {0, title_space}, {IMG_SIZE, title_space},
+            cv::Scalar(200, 200, 200), 1);
+
+    cv::putText(img,
+            "Trayectoria (" + std::to_string(poses.size()) + " poses)",
+            {140, bar_y + 10},
+            cv::FONT_HERSHEY_SIMPLEX, 0.75, {50, 50, 50}, 1, cv::LINE_AA);
+
+    cv::circle(img, {legend_init_x, bar_y}, 7, cv::Scalar(200, 0, 0), -1, cv::LINE_AA);
+    cv::putText(img, "Inicio", {legend_init_x + 12, bar_y + 5},
+            cv::FONT_HERSHEY_SIMPLEX, 0.45, {50, 50, 50}, 1, cv::LINE_AA);
+
+    cv::circle(img, {legend_end_x, bar_y}, 7, cv::Scalar(0, 0, 200), -1, cv::LINE_AA);
+    cv::putText(img, "Fin", {legend_end_x + 12, bar_y + 5},
+            cv::FONT_HERSHEY_SIMPLEX, 0.45, {50, 50, 50}, 1, cv::LINE_AA);
+
+    /* Save image */
+    std::string output_path = file_path_.parent_path().string() + "/robot_path_map.png";
+    cv::imwrite(output_path, img);
+    std::cout << "[INFO] Mapa guardado en: " << output_path << std::endl;
 }
 
 int main(int argc, char **argv)
