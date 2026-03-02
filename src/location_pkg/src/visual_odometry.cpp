@@ -187,14 +187,14 @@ static state_space_t computeVelocity(const std::vector<cv::Point2f>& prev_pts, c
     mass_center_curr *= (1.0f / curr_pts.size());
     cv::Point2f velocity = mass_center_curr - mass_center_prev;
 
-#define MOV_THRESHOLD 0.01
+    #define MOV_THRESHOLD 0.01
     velocity.x = std::fabs(velocity.x) > MOV_THRESHOLD ? velocity.x : 0.0f;
     velocity.y = std::fabs(velocity.y) > MOV_THRESHOLD ? velocity.y : 0.0f;
 
     if (velocity.x == 0.0f && velocity.y == 0.0f)
         return state_space_t{0.0, 0.0, 0.0};
 
-velocity.y *= -1;
+    velocity.y *= -1;
 
     double yaw_velocity = 0;
     std::vector<cv::Mat> vector_prev, vector_curr;
@@ -250,7 +250,7 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
     state_space_t vel = computeVelocity(prev_pts, curr_pts);
     static state_space_t position = {0.0, 0.0, 0.0};
-    
+
     position.linear_x += vel.linear_x;
     position.linear_y += vel.linear_y;
     position.angular_z += vel.angular_z;
