@@ -122,14 +122,15 @@ struct Pose {
 void MapperNode::generateMap()
 {
     /* Map allignment design */
-    constexpr int IMG_SIZE = 1000;
+    constexpr int IMG_HEIGHT = 1000;
+    constexpr int IMG_WIDTH = 1000;
     constexpr int margin_right = 50;
     constexpr int margin_top = 100;
     constexpr int margin_left = 110;
     constexpr int margin_bottom = 65;
     constexpr int title_space = margin_top - 20;
-    const int drawable_x = IMG_SIZE - margin_left - margin_right;
-    const int drawable_y = IMG_SIZE - margin_top - margin_bottom;
+    const int drawable_x = IMG_WIDTH - margin_left - margin_right;
+    const int drawable_y = IMG_HEIGHT - margin_top - margin_bottom;
 
     /* Read poses from .csv */
     std::ifstream in_file(file_path_.string());
@@ -202,12 +203,12 @@ void MapperNode::generateMap()
     std::cout << "======================================" << std::endl;
 
     /* Prepare canvas */
-    cv::Mat img(IMG_SIZE, IMG_SIZE, CV_8UC3, cv::Scalar(255, 255, 255));
+    cv::Mat img(IMG_HEIGHT, IMG_WIDTH, CV_8UC3, cv::Scalar(255, 255, 255));
     
     auto toPixel = [&](double x, double y) -> cv::Point 
     {
         int px = static_cast<int>(margin_left + (x - min_x + off_x) / scale * drawable_x);
-        int py = static_cast<int>(IMG_SIZE - margin_bottom - (y - min_y + off_y) / scale * drawable_y);
+        int py = static_cast<int>(IMG_HEIGHT - margin_bottom - (y - min_y + off_y) / scale * drawable_y);
         return {px, py};
     };
 
@@ -220,14 +221,14 @@ void MapperNode::generateMap()
         int offset_x = margin_left + i * drawable_x / num_divisions;
         int offset_y = margin_top + i * drawable_y / num_divisions;
 
-        cv::line(img, {offset_x, margin_top}, {offset_x, IMG_SIZE - margin_bottom}, grid_color, 1);
-        cv::line(img, {margin_left, offset_y}, {IMG_SIZE - margin_right, offset_y}, grid_color, 1);
+        cv::line(img, {offset_x, margin_top}, {offset_x, IMG_HEIGHT - margin_bottom}, grid_color, 1);
+        cv::line(img, {margin_left, offset_y}, {IMG_WIDTH - margin_right, offset_y}, grid_color, 1);
 
         double world_x = min_x + (double)i / num_divisions * scale - off_x;
         std::ostringstream label_x;
         label_x << std::fixed << std::setprecision(3) << world_x << "px";
         cv::putText(img, label_x.str(),
-                    {offset_x - 18, IMG_SIZE - margin_bottom + 20},
+                    {offset_x - 18, IMG_HEIGHT - margin_bottom + 20},
                     cv::FONT_HERSHEY_SIMPLEX, 0.35, {80, 80, 80}, 1, cv::LINE_AA);
 
         double world_y = min_y + (1.0 - (double)i / num_divisions) * scale - off_y;
@@ -239,15 +240,15 @@ void MapperNode::generateMap()
     }
 
     int px_0 = static_cast<int>(margin_left - min_x / scale * drawable_x + off_x / scale * drawable_x);
-    int py_0 = static_cast<int>(IMG_SIZE - margin_bottom + min_y / scale * drawable_y - off_y / scale * drawable_y);
-    cv::line(img, {px_0, margin_top}, {px_0, IMG_SIZE - margin_bottom}, grid_color, 2);
-    cv::line(img, {margin_left, py_0}, {IMG_SIZE - margin_right, py_0}, grid_color, 2);
+    int py_0 = static_cast<int>(IMG_HEIGHT - margin_bottom + min_y / scale * drawable_y - off_y / scale * drawable_y);
+    cv::line(img, {px_0, margin_top}, {px_0, IMG_HEIGHT - margin_bottom}, grid_color, 2);
+    cv::line(img, {margin_left, py_0}, {IMG_WIDTH - margin_right, py_0}, grid_color, 2);
 
     cv::rectangle(img, 
-                {margin_left, margin_top}, {IMG_SIZE - margin_right, IMG_SIZE - margin_bottom},
+                {margin_left, margin_top}, {IMG_WIDTH - margin_right, IMG_HEIGHT - margin_bottom},
                 cv::Scalar(150, 150, 150), 1);
 
-    cv::putText(img, "X (px)", {IMG_SIZE / 2 - 15, IMG_SIZE - 17},
+    cv::putText(img, "X (px)", {IMG_WIDTH / 2 - 15, IMG_HEIGHT - 17},
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, {50, 50, 50}, 1, cv::LINE_AA);
 
     cv::Mat y_label(30, 60, CV_8UC3, cv::Scalar(255, 255, 255));
@@ -255,7 +256,7 @@ void MapperNode::generateMap()
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, {50, 50, 50}, 1, cv::LINE_AA);
     cv::Mat y_rotated;
     cv::rotate(y_label, y_rotated, cv::ROTATE_90_COUNTERCLOCKWISE);
-    y_rotated.copyTo(img(cv::Rect(0, IMG_SIZE / 2 - 30, y_rotated.cols, y_rotated.rows)));
+    y_rotated.copyTo(img(cv::Rect(0, IMG_HEIGHT / 2 - 30, y_rotated.cols, y_rotated.rows)));
 
     /* Trayectory */
     double t0 = poses.front().timestamp;
@@ -293,12 +294,12 @@ void MapperNode::generateMap()
 
     /* Legend */
     const int bar_y = title_space / 2;
-    const int legend_init_x = IMG_SIZE - 220;
+    const int legend_init_x = IMG_WIDTH - 220;
     const int legend_end_x = legend_init_x + 80;
 
-    cv::rectangle(img, {0, 0}, {IMG_SIZE, title_space},
+    cv::rectangle(img, {0, 0}, {IMG_WIDTH, title_space},
             cv::Scalar(235, 235, 205), -1);
-    cv::line(img, {0, title_space}, {IMG_SIZE, title_space},
+    cv::line(img, {0, title_space}, {IMG_WIDTH, title_space},
             cv::Scalar(200, 200, 200), 1);
 
     cv::putText(img,
