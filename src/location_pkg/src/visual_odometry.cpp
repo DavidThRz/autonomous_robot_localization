@@ -194,6 +194,8 @@ static state_space_t computeVelocity(const std::vector<cv::Point2f>& prev_pts, c
     if (velocity.x == 0.0f && velocity.y == 0.0f)
         return state_space_t{0.0, 0.0, 0.0};
 
+velocity.y *= -1;
+
     double yaw_velocity = 0;
     std::vector<cv::Mat> vector_prev, vector_curr;
     for (size_t i = 0; i < prev_pts.size(); ++i) 
@@ -211,7 +213,7 @@ static state_space_t computeVelocity(const std::vector<cv::Point2f>& prev_pts, c
     R /= static_cast<double>(vector_prev.size());
     cv::SVD svd(R);
     cv::Mat R_ortho = svd.u * svd.vt;
-    yaw_velocity = atan2(R_ortho.at<double>(1,0), R_ortho.at<double>(0,0)) * 180.0 / CV_PI;
+    yaw_velocity = atan2(R_ortho.at<double>(1,0), R_ortho.at<double>(0,0));
 
     state_space_t vel;
     vel.linear_x = velocity.x;
@@ -242,13 +244,10 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
     state_space_t vel = computeVelocity(prev_pts, curr_pts);
     static state_space_t position = {0.0, 0.0, 0.0};
-    static rclcpp::Time prev_time = msg->header.stamp;
-    double time_diff = msg->header.stamp.sec - prev_time.seconds() + (msg->header.stamp.nanosec - prev_time.nanoseconds()) * 1e-9;
-
-    position.linear_x += vel.linear_x * time_diff;
-    position.linear_y += vel.linear_y * time_diff;
-    position.angular_z += vel.angular_z * time_diff;
-    prev_time = msg->header.stamp;
+    
+    position.linear_x += vel.linear_x;
+    position.linear_y += vel.linear_y;
+    position.angular_z += vel.angular_z;
 
     if (true)   // TODO: send only when map stream is active
     {
