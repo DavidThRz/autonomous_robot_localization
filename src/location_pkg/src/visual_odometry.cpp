@@ -224,6 +224,12 @@ velocity.y *= -1;
 
 void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
+    #define SKIP_FRAMES 20
+
+    static int aux = 0;
+    if ( aux++ < SKIP_FRAMES)
+        return;
+
     new_frame_ = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
 
     static cv::Mat prev_frame = new_frame_.clone();
