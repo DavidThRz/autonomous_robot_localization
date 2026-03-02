@@ -14,6 +14,7 @@
 
 #include <httplib.h>
 #include <mutex>
+#include <filesystem>
 
 using std::placeholders::_1;
 using std::placeholders::_2;
@@ -35,6 +36,29 @@ public:
         server_thread_ = std::thread(&StreamingNode::streamServer, this);
 
         RCLCPP_INFO(this->get_logger(), "Streaming node started");
+
+        rclcpp::on_shutdown([this]() { this->onShutdown(); });
+    }
+
+    void onShutdown()
+    {
+        namespace fs = std::filesystem;
+        const fs::path map_dir = fs::path(std::getenv("HOME")) / 
+                            "autonomous_robot_localization" / 
+                            "data" /
+                            "robot_path_map.png";
+        while (!fs::exists(map_dir))
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::cout << "waiting for map generation to finish..." << std::endl;
+        }
+        std::cout << "Map found, sending to stream..." << std::endl;
+
+        cv::Mat map_color = cv::imread(map_dir.string(), cv::IMREAD_COLOR);
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+        stream_frame_ = map_color.clone();
+        new_frame_ = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
     ~StreamingNode()
