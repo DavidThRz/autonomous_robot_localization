@@ -151,6 +151,8 @@ void VisualNode::computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& 
     if (prev_pts.empty())
         return;
 
+    cv::cornerSubPix(prev_frame, prev_pts, cv::Size(5,5), cv::Size(-1,-1), termCrit);
+
     std::vector<uchar> status;
     std::vector<float> err;
     cv::calcOpticalFlowPyrLK(prev_frame, curr_frame, prev_pts, curr_pts, status, err, winSize, maxLevel, termCrit);
@@ -184,6 +186,13 @@ static state_space_t computeVelocity(const std::vector<cv::Point2f>& prev_pts, c
     mass_center_prev *= (1.0f / prev_pts.size());
     mass_center_curr *= (1.0f / curr_pts.size());
     cv::Point2f velocity = mass_center_curr - mass_center_prev;
+
+#define MOV_THRESHOLD 0.01
+    velocity.x = std::fabs(velocity.x) > MOV_THRESHOLD ? velocity.x : 0.0f;
+    velocity.y = std::fabs(velocity.y) > MOV_THRESHOLD ? velocity.y : 0.0f;
+
+    if (velocity.x == 0.0f && velocity.y == 0.0f)
+        return state_space_t{0.0, 0.0, 0.0};
 
     double yaw_velocity = 0;
     std::vector<cv::Mat> vector_prev, vector_curr;
