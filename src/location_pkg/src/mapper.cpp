@@ -40,6 +40,13 @@ public:
             RCLCPP_INFO(this->get_logger(), "Existing file renamed to: %s", old_filepath.string().c_str());
         }
 
+        fs::path map_path = data_dir / "robot_path_map.png";
+        if (fs::exists(map_path))
+        {
+            fs::remove(map_path);
+            RCLCPP_INFO(this->get_logger(), "Removed existing map file: %s", map_path.string().c_str());
+        }
+
         csv_file_.open(file_path_, std::ios::out);
         if (!csv_file_.is_open())
         {
