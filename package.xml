@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>location_pkg</name>
+  <name>autonomous_robot_localization_pkg</name>
   <version>0.0.1</version>
   <description>Paquete para estimación de posición y streaming de cámara</description>
 

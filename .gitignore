@@ -1,6 +1,0 @@
-# --- Carpetas de build/instalación y logs (colcon/CMake) ---
-/build/
-/install/
-/log/
-/data/
-/.vscode/

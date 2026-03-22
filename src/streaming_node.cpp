@@ -12,7 +12,7 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/bool.hpp>
 
-#include <httplib.h>
+#include <autonomous_robot_localization/httplib.h>
 #include <mutex>
 #include <filesystem>
 
