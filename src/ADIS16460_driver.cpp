@@ -90,3 +90,59 @@ int ADIS16460_driver::readRegister(uint8_t reg, uint16_t &value)
 
     return 0;
 }
+
+bool ADIS16460_driver::testImu()
+{
+    uint16_t value;
+    if (readRegister(0x56, value) == 1) 
+        return false;
+
+    if (value != 0x404C) 
+        return false;
+
+    return true;
+}
+
+bool ADIS16460_driver::testGyroData(double &gyro_x, double &gyro_y, double &gyro_z)
+{
+    if (error_state)
+        return false;
+
+    uint16_t raw_x, raw_y, raw_z;
+    if (readRegister(X_GYRO_OUT, raw_x) < 0) return false;
+    if (readRegister(Y_GYRO_OUT, raw_y) < 0) return false;
+    if (readRegister(Z_GYRO_OUT, raw_z) < 0) return false;
+
+    gyro_x = static_cast<int16_t>(raw_x) * 0.005;
+    gyro_y = static_cast<int16_t>(raw_y) * 0.005;
+    gyro_z = static_cast<int16_t>(raw_z) * 0.005;
+
+    std::cout << "Gyroscope Data: " << std::endl;
+    std::cout << "  GYRO_X: " << gyro_x << std::endl;
+    std::cout << "  GYRO_Y: " << gyro_y << std::endl;
+    std::cout << "  GYRO_Z: " << gyro_z << std::endl;
+
+    return true;
+}
+
+bool ADIS16460_driver::testAcclData(double &accl_x, double &accl_y, double &accl_z)
+{
+    if (error_state)
+        return false;
+
+    uint16_t raw_x, raw_y, raw_z;
+    if (readRegister(X_ACCL_OUT, raw_x) < 0) return false;
+    if (readRegister(Y_ACCL_OUT, raw_y) < 0) return false;
+    if (readRegister(Z_ACCL_OUT, raw_z) < 0) return false;
+
+    accl_x = static_cast<int16_t>(raw_x) * 0.25 * g_ / 1000.0;
+    accl_y = static_cast<int16_t>(raw_y) * 0.25 * g_ / 1000.0;
+    accl_z = static_cast<int16_t>(raw_z) * 0.25 * g_ / 1000.0;
+
+    std::cout << "Accelerometer Data: " << std::endl;
+    std::cout << "  ACCEL_X: " << accl_x << std::endl;
+    std::cout << "  ACCEL_Y: " << accl_y << std::endl;
+    std::cout << "  ACCEL_Z: " << accl_z << std::endl;
+
+    return true;
+}

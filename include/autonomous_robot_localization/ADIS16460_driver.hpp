@@ -21,6 +21,19 @@ public:
 
     int readRegister(uint8_t reg, uint16_t &value);
 
+    /* @brief Tests if IMU is functioning correctly checking its product identifier */
+    bool testImu();
+
+    /* @brief Outputs gyroscope data with a resolution of 0.005 º/s
+     * @return true on success, false on failure
+     */
+    bool testGyroData(double &gyro_x, double &gyro_y, double &gyro_z);
+
+    /* @brief Outputs accelerometer data with a resolution of 0.25 mg
+     * @return true on success, false on failure
+     */
+    bool testAcclData(double &accl_x, double &accl_y, double &accl_z);
+
 private:
 
     const char* isp_device;
@@ -32,6 +45,8 @@ private:
     uint8_t imu_bits_per_word;
 
 };
+
+#define g_         9.80665
 
 /* ADIS16460 Registers */
 #define FLASH_CNT  0x00  /* Flash memory write count */
