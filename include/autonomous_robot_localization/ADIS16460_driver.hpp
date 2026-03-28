@@ -19,22 +19,32 @@ public:
     ADIS16460_driver();
     ~ADIS16460_driver();
 
-    int readRegister(uint8_t reg, uint16_t &value);
-
     /* @brief Tests if IMU is functioning correctly checking its product identifier */
     bool testImu();
 
     /* @brief Outputs gyroscope data with a resolution of 0.005 º/s
      * @return true on success, false on failure
      */
-    bool testGyroData(double &gyro_x, double &gyro_y, double &gyro_z);
+    bool testGyroData();
 
     /* @brief Outputs accelerometer data with a resolution of 0.25 mg
      * @return true on success, false on failure
      */
-    bool testAcclData(double &accl_x, double &accl_y, double &accl_z);
+    bool testAcclData();
+
+    /* @brief Reads the offset values from the accelerometer registers */
+    void readOffsets();
+
+    /* @brief Reads register with time to estimate sensor bias for calibration */
+    void readBiasEstimationTimeFactor();
+
+    /* @brief Sets the bias estimation time factor in the filter control register */
+    void setBiasEstimationTimeFactor(uint8_t time_factor);
 
 private:
+
+    int readRegister(uint8_t reg, uint16_t &value);
+    int writeRegister(uint8_t reg, uint8_t value);
 
     const char* isp_device;
     int isp_fd;

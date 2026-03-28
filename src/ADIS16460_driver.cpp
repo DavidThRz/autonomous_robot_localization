@@ -91,6 +91,31 @@ int ADIS16460_driver::readRegister(uint8_t reg, uint16_t &value)
     return 0;
 }
 
+int ADIS16460_driver::writeRegister(uint8_t reg, uint8_t value)
+{
+    if (error_state)
+        return -1;
+
+    reg |= 0x80;
+    uint8_t tx_buf[2] = {reg, value};
+
+    struct spi_ioc_transfer tr;
+    memset(&tr, 0, sizeof(tr));
+    tr.tx_buf = (unsigned long)tx_buf;
+    tr.rx_buf = 0;
+    tr.len = 2;
+    tr.speed_hz = imu_frequency_hz;
+    tr.bits_per_word = imu_bits_per_word;
+
+    if (ioctl(isp_fd, SPI_IOC_MESSAGE(1), &tr) < 1) 
+    {
+        std::cerr << "Error: writing to register.\n";
+        return -1;
+    }
+
+    return 0;
+}
+
 bool ADIS16460_driver::testImu()
 {
     uint16_t value;
@@ -103,7 +128,7 @@ bool ADIS16460_driver::testImu()
     return true;
 }
 
-bool ADIS16460_driver::testGyroData(double &gyro_x, double &gyro_y, double &gyro_z)
+bool ADIS16460_driver::testGyroData()
 {
     if (error_state)
         return false;
@@ -113,6 +138,7 @@ bool ADIS16460_driver::testGyroData(double &gyro_x, double &gyro_y, double &gyro
     if (readRegister(Y_GYRO_OUT, raw_y) < 0) return false;
     if (readRegister(Z_GYRO_OUT, raw_z) < 0) return false;
 
+    double gyro_x, gyro_y, gyro_z;
     gyro_x = static_cast<int16_t>(raw_x) * 0.005;
     gyro_y = static_cast<int16_t>(raw_y) * 0.005;
     gyro_z = static_cast<int16_t>(raw_z) * 0.005;
@@ -125,7 +151,7 @@ bool ADIS16460_driver::testGyroData(double &gyro_x, double &gyro_y, double &gyro
     return true;
 }
 
-bool ADIS16460_driver::testAcclData(double &accl_x, double &accl_y, double &accl_z)
+bool ADIS16460_driver::testAcclData()
 {
     if (error_state)
         return false;
@@ -135,6 +161,7 @@ bool ADIS16460_driver::testAcclData(double &accl_x, double &accl_y, double &accl
     if (readRegister(Y_ACCL_OUT, raw_y) < 0) return false;
     if (readRegister(Z_ACCL_OUT, raw_z) < 0) return false;
 
+    double accl_x, accl_y, accl_z;
     accl_x = static_cast<int16_t>(raw_x) * 0.25 * g_ / 1000.0;
     accl_y = static_cast<int16_t>(raw_y) * 0.25 * g_ / 1000.0;
     accl_z = static_cast<int16_t>(raw_z) * 0.25 * g_ / 1000.0;
@@ -145,4 +172,69 @@ bool ADIS16460_driver::testAcclData(double &accl_x, double &accl_y, double &accl
     std::cout << "  ACCEL_Z: " << accl_z << std::endl;
 
     return true;
+}
+
+void ADIS16460_driver::readOffsets()
+{
+    if (error_state)
+        return;
+    
+    uint16_t x_gyro_offset, y_gyro_offset, z_gyro_offset;
+    uint16_t x_accl_offset, y_accl_offset, z_accl_offset;
+    
+    if (readRegister(X_GYRO_OFF, x_gyro_offset) < 0) return;
+    if (readRegister(Y_GYRO_OFF, y_gyro_offset) < 0) return;
+    if (readRegister(Z_GYRO_OFF, z_gyro_offset) < 0) return;
+    if (readRegister(X_ACCL_OFF, x_accl_offset) < 0) return;
+    if (readRegister(Y_ACCL_OFF, y_accl_offset) < 0) return;
+    if (readRegister(Z_ACCL_OFF, z_accl_offset) < 0) return;
+
+    std::cout << "Gyroscope Offsets: " << std::endl;
+    std::cout << "  X_GYRO_OFFSET: " << static_cast<int16_t>(x_gyro_offset) << std::endl;
+    std::cout << "  Y_GYRO_OFFSET: " << static_cast<int16_t>(y_gyro_offset) << std::endl;
+    std::cout << "  Z_GYRO_OFFSET: " << static_cast<int16_t>(z_gyro_offset) << std::endl;
+    std::cout << "Accelerometer Offsets: " << std::endl;
+    std::cout << "  X_ACCL_OFFSET: " << static_cast<int16_t>(x_accl_offset) << std::endl;
+    std::cout << "  Y_ACCL_OFFSET: " << static_cast<int16_t>(y_accl_offset) << std::endl;
+    std::cout << "  Z_ACCL_OFFSET: " << static_cast<int16_t>(z_accl_offset) << std::endl;
+}
+
+void ADIS16460_driver::readBiasEstimationTimeFactor()
+{
+    if (error_state)
+        return;
+
+    const uint16_t time_factor_mask = 0x0700;
+    uint16_t raw_value;
+    if (readRegister(FLTR_CTRL, raw_value) < 0) return;
+
+    uint8_t bias_estimation_time_factor = (raw_value & time_factor_mask) >> 8;
+
+    std::cout << "Bias Estimation Time Factor: " << static_cast<int>(bias_estimation_time_factor) << std::endl;
+}
+
+void ADIS16460_driver::setBiasEstimationTimeFactor(uint8_t time_factor)
+{
+    if (error_state)
+        return;
+
+    if (time_factor > 6) 
+    {
+        std::cerr << "Error: Time factor must be between 0 and 6" << std::endl;
+        return;
+    }
+
+    if (writeRegister(0x39, time_factor) < 0) return;
+
+    uint16_t raw_value;
+    if (readRegister(FLTR_CTRL, raw_value) < 0) return;
+
+    uint8_t changed_time_factor = (raw_value & 0x0700) >> 8;
+    if (changed_time_factor != time_factor) 
+    {
+        std::cerr << "Error: Failed to set Bias Estimation Time Factor." << std::endl;
+        return;
+    }
+
+    std::cout << "Bias estimation time factor successfully set to: " << static_cast<int>(time_factor) << std::endl;
 }
