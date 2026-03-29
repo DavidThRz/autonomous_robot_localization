@@ -68,7 +68,7 @@ target_link_libraries(mapper_node
 )
 
 # --- IMU node ---
-add_executable(imu_node src/imu_node.cpp src/ADIS16460_driver.cpp)
+add_executable(imu_node src/imu_node.cpp src/imu_class.cpp src/ADIS16460_driver.cpp)
 target_include_directories(imu_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>

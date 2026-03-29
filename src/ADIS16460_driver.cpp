@@ -1,7 +1,7 @@
 
 #include "autonomous_robot_localization/ADIS16460_driver.hpp"
 
-ADIS16460_driver::ADIS16460_driver(rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher) : isp_device("/dev/spidev0.0"), imu_publisher(imu_publisher)
+ADIS16460_driver::ADIS16460_driver() : isp_device("/dev/spidev0.0")
 {
     error_state = false;
 
@@ -108,15 +108,15 @@ bool ADIS16460_driver::testImu()
     return true;
 }
 
-bool ADIS16460_driver::testGyroData()
+void ADIS16460_driver::printGyroData()
 {
     if (error_state)
-        return false;
+        return;
 
     uint16_t raw_x, raw_y, raw_z;
-    if (readRegister(X_GYRO_OUT, raw_x) < 0) return false;
-    if (readRegister(Y_GYRO_OUT, raw_y) < 0) return false;
-    if (readRegister(Z_GYRO_OUT, raw_z) < 0) return false;
+    if (readRegister(X_GYRO_OUT, raw_x) < 0) return;
+    if (readRegister(Y_GYRO_OUT, raw_y) < 0) return;
+    if (readRegister(Z_GYRO_OUT, raw_z) < 0) return;
 
     double gyro_x, gyro_y, gyro_z;
     gyro_x = static_cast<int16_t>(raw_x) * 0.005;
@@ -128,18 +128,18 @@ bool ADIS16460_driver::testGyroData()
     std::cout << "  GYRO_Y: " << gyro_y << std::endl;
     std::cout << "  GYRO_Z: " << gyro_z << std::endl;
 
-    return true;
+    return;
 }
 
-bool ADIS16460_driver::testAcclData()
+void ADIS16460_driver::printAcclData()
 {
     if (error_state)
-        return false;
+        return;
 
     uint16_t raw_x, raw_y, raw_z;
-    if (readRegister(X_ACCL_OUT, raw_x) < 0) return false;
-    if (readRegister(Y_ACCL_OUT, raw_y) < 0) return false;
-    if (readRegister(Z_ACCL_OUT, raw_z) < 0) return false;
+    if (readRegister(X_ACCL_OUT, raw_x) < 0) return;
+    if (readRegister(Y_ACCL_OUT, raw_y) < 0) return;
+    if (readRegister(Z_ACCL_OUT, raw_z) < 0) return;
 
     double accl_x, accl_y, accl_z;
     accl_x = static_cast<int16_t>(raw_x) * 0.25 * g_ / 1000.0;
@@ -151,17 +151,16 @@ bool ADIS16460_driver::testAcclData()
     std::cout << "  ACCEL_Y: " << accl_y << std::endl;
     std::cout << "  ACCEL_Z: " << accl_z << std::endl;
 
-    return true;
+    return;
 }
 
-bool ADIS16460_driver::readIMUData()
+bool ADIS16460_driver::getIMUData(double &gyro_x, double &gyro_y, double &gyro_z, double &accl_x, double &accl_y, double &accl_z)
 {
     uint16_t raw_x, raw_y, raw_z;
     if (readRegister(X_GYRO_OUT, raw_x) < 0) return false;
     if (readRegister(Y_GYRO_OUT, raw_y) < 0) return false;
     if (readRegister(Z_GYRO_OUT, raw_z) < 0) return false;
 
-    double gyro_x, gyro_y, gyro_z;
     gyro_x = static_cast<int16_t>(raw_x) * 0.005;
     gyro_y = static_cast<int16_t>(raw_y) * 0.005;
     gyro_z = static_cast<int16_t>(raw_z) * 0.005;
@@ -170,24 +169,14 @@ bool ADIS16460_driver::readIMUData()
     if (readRegister(Y_ACCL_OUT, raw_y) < 0) return false;
     if (readRegister(Z_ACCL_OUT, raw_z) < 0) return false;
 
-    double accl_x, accl_y, accl_z;
     accl_x = static_cast<int16_t>(raw_x) * 0.25 * g_ / 1000.0;
     accl_y = static_cast<int16_t>(raw_y) * 0.25 * g_ / 1000.0;
     accl_z = static_cast<int16_t>(raw_z) * 0.25 * g_ / 1000.0;
-
-    sensor_msgs::msg::Imu imu_msg;
-    imu_msg.angular_velocity.x = gyro_x;
-    imu_msg.angular_velocity.y = gyro_y;
-    imu_msg.angular_velocity.z = gyro_z;
-    imu_msg.linear_acceleration.x = accl_x;
-    imu_msg.linear_acceleration.y = accl_y;
-    imu_msg.linear_acceleration.z = accl_z;
-    imu_publisher->publish(imu_msg);
-
+ 
     return true;
 }
 
-void ADIS16460_driver::readOffsets()
+void ADIS16460_driver::printBiasOffsets()
 {
     if (error_state)
         return;
@@ -212,7 +201,7 @@ void ADIS16460_driver::readOffsets()
     std::cout << "  Z_ACCL_OFFSET: " << static_cast<int16_t>(z_accl_offset) << std::endl;
 }
 
-void ADIS16460_driver::readBiasEstimationTimeFactor()
+void ADIS16460_driver::printBiasEstimationTimeFactor()
 {
     if (error_state)
         return;
