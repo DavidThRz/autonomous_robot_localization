@@ -50,43 +50,9 @@ int ADIS16460_driver::readRegister(uint8_t reg, uint16_t &value)
     if (error_state)
         return -1;
     
-    uint8_t tx_req[2]   = {reg, 0x00};
-    uint8_t rx_dummy[2] = {0, 0};
-
-    uint8_t tx_dummy[2] = {0x00, 0x00};
-    uint8_t rx_resp[2]  = {0, 0};
-
-    struct spi_ioc_transfer tr_req;
-    memset(&tr_req, 0, sizeof(tr_req));
-    tr_req.tx_buf = (unsigned long)tx_req;
-    tr_req.rx_buf = (unsigned long)rx_dummy;
-    tr_req.len = 2;
-    tr_req.speed_hz = imu_frequency_hz;
-    tr_req.bits_per_word = imu_bits_per_word;
-
-    if (ioctl(isp_fd, SPI_IOC_MESSAGE(1), &tr_req) < 1) 
-    {
-        std::cerr << "Error: sending request.\n";
-        return -1;
-    }
-
+    sendSPI(reg);
     usleep(16);
-
-    struct spi_ioc_transfer tr_res;
-    memset(&tr_res, 0, sizeof(tr_res));
-    tr_res.tx_buf = (unsigned long)tx_dummy;
-    tr_res.rx_buf = (unsigned long)rx_resp;
-    tr_res.len = 2;
-    tr_res.speed_hz = imu_frequency_hz;
-    tr_res.bits_per_word = imu_bits_per_word;
-
-    if (ioctl(isp_fd, SPI_IOC_MESSAGE(1), &tr_res) < 1) 
-    {
-        std::cerr << "Error: reading response.\n";
-        return -1;
-    }
-
-    value = (rx_resp[0] << 8) | rx_resp[1];
+sendSPI(0x00, 0x00, &    value);
 
     return 0;
 }
@@ -97,21 +63,35 @@ int ADIS16460_driver::writeRegister(uint8_t reg, uint8_t value)
         return -1;
 
     reg |= 0x80;
+sendSPI(reg, value);
+
+    return 0;
+}
+
+int ADIS16460_driver::sendSPI(uint8_t reg, uint8_t value, uint16_t* response)
+{
+    if (error_state)
+        return -1;
+
     uint8_t tx_buf[2] = {reg, value};
+uint8_t rx_resp[2] = {0, 0};
 
     struct spi_ioc_transfer tr;
     memset(&tr, 0, sizeof(tr));
     tr.tx_buf = (unsigned long)tx_buf;
-    tr.rx_buf = 0;
+    tr.rx_buf = (unsigned long)rx_resp;
     tr.len = 2;
     tr.speed_hz = imu_frequency_hz;
     tr.bits_per_word = imu_bits_per_word;
 
     if (ioctl(isp_fd, SPI_IOC_MESSAGE(1), &tr) < 1) 
     {
-        std::cerr << "Error: writing to register.\n";
+        std::cerr << "Error: SPI communication failed.\n";
         return -1;
     }
+
+if (response) 
+        *response = (rx_resp[0] << 8) | rx_resp[1];
 
     return 0;
 }

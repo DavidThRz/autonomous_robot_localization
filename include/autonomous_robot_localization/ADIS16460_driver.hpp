@@ -46,6 +46,8 @@ private:
     int readRegister(uint8_t reg, uint16_t &value);
     int writeRegister(uint8_t reg, uint8_t value);
 
+    int sendSPI(uint8_t reg, uint8_t value = 0x00, uint16_t* response = nullptr);
+
     const char* isp_device;
     int isp_fd;
 
