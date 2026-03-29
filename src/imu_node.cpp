@@ -1,32 +1,33 @@
 
-#include "rclcpp/rclcpp.hpp"
 #include "autonomous_robot_localization/ADIS16460_driver.hpp"
+
+#include <chrono>
+using namespace std::chrono_literals;
 
 int main(int argc, char** argv) 
 {
     rclcpp::init(argc, argv);
+    auto node = rclcpp::Node::make_shared("imu_node");
 
-    ADIS16460_driver imu_driver;
+    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher = 
+        node->create_publisher<sensor_msgs::msg::Imu>("imu/data", 10);
 
-    bool test_result = imu_driver.testImu();
-    if (test_result)
-        std::cout << "IMU test passed successfully." << std::endl;
-    else
-        std::cerr << "IMU test failed." << std::endl;
-
-    while(rclcpp::ok())
+    ADIS16460_driver imu_driver(imu_publisher);
+    if (!imu_driver.testImu()) 
     {
-        double accel_x, accel_y, accel_z;
-        double gyro_x, gyro_y, gyro_z;
-        if (!imu_driver.testAcclData(accel_x, accel_y, accel_z) ||
-            !imu_driver.testGyroData(gyro_x, gyro_y, gyro_z)) 
-        {
-            std::cerr << "Failed to read IMU data." << std::endl;
-            break;
-        }
-
-        rclcpp::sleep_for(std::chrono::milliseconds(100));
+        std::cerr << "IMU not responding correctly. Exiting." << std::endl;
+        return -1;
     }
+
+    auto timer = node->create_wall_timer(
+        100ms, 
+        std::bind(&ADIS16460_driver::readIMUData, &imu_driver)
+    );
+
+    RCLCPP_INFO(node->get_logger(), "Nodo IMU iniciado");
+
+    rclcpp::spin(node);
+    rclcpp::shutdown();
 
     return 0;
 }

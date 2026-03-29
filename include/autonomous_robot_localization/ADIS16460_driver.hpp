@@ -13,10 +13,13 @@
 #include <cstring>
 #include <iomanip>
 
+#include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/imu.hpp"
+
 class ADIS16460_driver
 {
 public:
-    ADIS16460_driver();
+    ADIS16460_driver(rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher);
     ~ADIS16460_driver();
 
     /* @brief Tests if IMU is functioning correctly checking its product identifier */
@@ -31,6 +34,9 @@ public:
      * @return true on success, false on failure
      */
     bool testAcclData();
+
+    /* @brief Reads gyroscope and accelerometer data */
+    bool readIMUData();
 
     /* @brief Reads the offset values from the accelerometer registers */
     void readOffsets();
@@ -56,6 +62,7 @@ private:
     uint32_t imu_frequency_hz;
     uint8_t imu_bits_per_word;
 
+    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher;
 };
 
 #define g_         9.80665
