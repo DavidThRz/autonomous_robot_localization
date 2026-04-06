@@ -25,29 +25,17 @@ public:
     /* @brief Reads gyroscope and accelerometer data */
     bool getIMUData(double &gyro_x, double &gyro_y, double &gyro_z, double &accl_x, double &accl_y, double &accl_z);
 
-    /* @brief Sets the bias estimation time factor in the filter control register */
-    void setBiasEstimationTimeFactor(uint8_t time_factor);
+    /* @brief Sets the bias offset values for each axis */
+    void setBiasOffsets(double gyro_x_offset, double gyro_y_offset, double gyro_z_offset, double accl_x_offset, double accl_y_offset, double accl_z_offset);
 
-    /* @brief Reads register with time to estimate sensor bias for calibration */
-    void printBiasEstimationTimeFactor();
-
-    /* @brief Outputs gyroscope data with a resolution of 0.005 º/s
-     * @return true on success, false on failure
-     */
-    void printGyroData();
-
-    /* @brief Outputs accelerometer data with a resolution of 0.25 mg
-     * @return true on success, false on failure
-     */
-    void printAcclData();
-
-    /* @brief Reads the offset values from the accelerometer registers */
-    void printBiasOffsets();
+    /* @brief Sets all bias offset registers to zero */
+    void resetBiasOffsets();
 
 private:
 
     int readRegister(uint8_t reg, uint16_t &value);
     int writeRegister(uint8_t reg, uint8_t value);
+    int writeRegister(uint8_t reg, uint16_t value);
 
     int sendSPI(uint8_t reg, uint8_t value = 0x00, uint16_t* response = nullptr);
 
@@ -60,7 +48,8 @@ private:
     uint8_t imu_bits_per_word;
 };
 
-#define g_         9.80665
+#define C_PI 3.14159265358979323846
+#define C_g  9.80665
 
 /* ADIS16460 Registers */
 #define FLASH_CNT  0x00  /* Flash memory write count */

@@ -12,6 +12,7 @@ find_package(OpenCV REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(std_srvs REQUIRED)
 pkg_check_modules(libcamera REQUIRED libcamera)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -73,7 +74,7 @@ target_include_directories(imu_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-ament_target_dependencies(imu_node rclcpp sensor_msgs)
+ament_target_dependencies(imu_node rclcpp sensor_msgs std_srvs)
 
 # Installation
 install(TARGETS 
