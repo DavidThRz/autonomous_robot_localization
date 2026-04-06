@@ -12,6 +12,7 @@
 #include <linux/spi/spidev.h>
 #include <cstring>
 #include <iomanip>
+#include <mutex>
 
 class ADIS16460_driver
 {
@@ -46,6 +47,8 @@ private:
 
     uint32_t imu_frequency_hz;
     uint8_t imu_bits_per_word;
+
+    std::mutex spi_mutex_;
 };
 
 #define C_PI 3.14159265358979323846

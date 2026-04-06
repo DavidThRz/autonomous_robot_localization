@@ -85,6 +85,8 @@ int ADIS16460_driver::sendSPI(uint8_t reg, uint8_t value, uint16_t* response)
     if (error_state)
         return -1;
 
+    std::lock_guard<std::mutex> lock(spi_mutex_);
+
     uint8_t tx_buf[2] = {reg, value};
     uint8_t rx_resp[2] = {0, 0};
 
