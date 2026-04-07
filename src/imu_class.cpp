@@ -4,21 +4,29 @@
 #include <chrono>
 using namespace std::chrono_literals;
 
-IMU_Node::IMU_Node() : Node("imu_node")
+IMU_Node::IMU_Node() : Node("imu_node"), imu_driver_(nullptr)
 {    
-    if (!imu_driver_.testImu()) 
+    this->declare_parameter<std::string>("spi_device", "/dev/spidev0.0");
+    this->declare_parameter<int>("publish_rate_freq", 10);
+    this->declare_parameter<std::string>("frame_id", "imu_link");
+
+    const std::string spi_device = this->get_parameter("spi_device").as_string();
+    imu_driver_ = new ADIS16460_driver(spi_device);
+    if (!imu_driver_->testImu()) 
     {
         RCLCPP_FATAL(this->get_logger(), "IMU not responding correctly at startup. Exiting.");
         throw std::runtime_error("IMU initialization failed");
     }
     RCLCPP_INFO(this->get_logger(), "IMU detected and initialized successfully.");
+    
+    uint16_t publish_rate_freq_ = this->get_parameter("publish_rate_freq").as_int();
 
     imu_publisher = 
         this->create_publisher<sensor_msgs::msg::Imu>("imu/data", 10);
 
     timer = 
         this->create_wall_timer(
-        100ms, 
+        std::chrono::milliseconds(1000 / publish_rate_freq_),
         std::bind(&IMU_Node::publishIMUData, this)
     );
 
@@ -40,6 +48,7 @@ IMU_Node::IMU_Node() : Node("imu_node")
 IMU_Node::~IMU_Node()
 {
     RCLCPP_INFO(this->get_logger(), "Finalizing IMU node");
+    delete imu_driver_;
 }
 
 void IMU_Node::publishIMUData()
@@ -47,13 +56,15 @@ void IMU_Node::publishIMUData()
     double gyro_x, gyro_y, gyro_z;
     double accl_x, accl_y, accl_z;
 
-    if (!imu_driver_.getIMUData(gyro_x, gyro_y, gyro_z, accl_x, accl_y, accl_z)) 
+    if (!imu_driver_->getIMUData(gyro_x, gyro_y, gyro_z, accl_x, accl_y, accl_z)) 
     {
         RCLCPP_ERROR(this->get_logger(), "Error reading IMU data");
         return;
     }
 
     sensor_msgs::msg::Imu imu_msg;
+    imu_msg.header.stamp = this->get_clock()->now();
+    imu_msg.header.frame_id = "imu_link";
     imu_msg.angular_velocity.x = gyro_x;
     imu_msg.angular_velocity.y = gyro_y;
     imu_msg.angular_velocity.z = gyro_z;
@@ -72,7 +83,7 @@ void IMU_Node::publishIMUData()
         num_samples_ = 0;
         RCLCPP_INFO(this->get_logger(), "Calibration started, collecting data...");
 
-        imu_driver_.resetBiasOffsets();
+        imu_driver_->resetBiasOffsets();
         return; /* Start calibrating with offsets reset */
     }
 
@@ -100,7 +111,7 @@ void IMU_Node::publishIMUData()
             std::cout << " >> Gyro bias (º/s): x=" << sum_gyro_x << ", y=" << sum_gyro_y << ", z=" << sum_gyro_z << std::endl;
             std::cout << " >> Accel bias (mg): x=" << sum_accl_x << ", y=" << sum_accl_y << ", z=" << sum_accl_z << std::endl;
 
-            imu_driver_.setBiasOffsets(-sum_gyro_x, -sum_gyro_y, -sum_gyro_z, -sum_accl_x, -sum_accl_y, -sum_accl_z);
+            imu_driver_->setBiasOffsets(-sum_gyro_x, -sum_gyro_y, -sum_gyro_z, -sum_accl_x, -sum_accl_y, -sum_accl_z);
 
             std::cout << " >> Calibration completed" << std::endl;
             calibrating_ = false;

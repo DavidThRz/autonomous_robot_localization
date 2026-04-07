@@ -17,7 +17,7 @@
 class ADIS16460_driver
 {
 public:
-    ADIS16460_driver();
+    ADIS16460_driver(const std::string& spi_device);
     ~ADIS16460_driver();
 
     /* @brief Tests if IMU is functioning correctly checking its product identifier */

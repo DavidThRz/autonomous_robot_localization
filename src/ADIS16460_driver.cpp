@@ -1,8 +1,9 @@
 
 #include "autonomous_robot_localization/ADIS16460_driver.hpp"
 
-ADIS16460_driver::ADIS16460_driver() : isp_device("/dev/spidev0.0")
+ADIS16460_driver::ADIS16460_driver(const std::string& spi_device)
 {
+    isp_device = spi_device.c_str();
     error_state = false;
 
     isp_fd = open(isp_device, O_RDWR);

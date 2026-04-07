@@ -25,7 +25,7 @@ private:
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr calibration_service;
     rclcpp::TimerBase::SharedPtr timer;
 
-    ADIS16460_driver imu_driver_;
+    ADIS16460_driver* imu_driver_;
 
     bool calibrating_;
     bool calibrate_requested_;

@@ -1,0 +1,5 @@
+imu_node:
+  ros__parameters:
+    spi_device: "/dev/spidev0.0"
+    publish_rate_freq: 100
+    frame_id: "imu_link"
