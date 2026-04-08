@@ -36,11 +36,11 @@ IMU_Node::IMU_Node() : Node("imu_node"), imu_driver_(nullptr)
         std::bind(&IMU_Node::calibrateIMU, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    calibrating_ = false;
-    calibrate_requested_ = false;
     sum_gyro_x = sum_gyro_y = sum_gyro_z = 0.0;
     sum_accl_x = sum_accl_y = sum_accl_z = 0.0;
     num_samples_ = 0;
+
+    imu_state_ = ImuState::RUNNING;
 
     RCLCPP_INFO(this->get_logger(), "Starting IMU node");
 }
@@ -73,21 +73,7 @@ void IMU_Node::publishIMUData()
     imu_msg.linear_acceleration.z = accl_z;
     imu_publisher->publish(imu_msg);
 
-    /* Check calibration */
-    static auto start_time = std::chrono::steady_clock::now();
-    if (!calibrating_ && calibrate_requested_) 
-    {
-        calibrating_ = true;
-        calibrate_requested_ = false;
-        start_time = std::chrono::steady_clock::now();
-        num_samples_ = 0;
-        RCLCPP_INFO(this->get_logger(), "Calibration started, collecting data...");
-
-        imu_driver_->resetBiasOffsets();
-        return; /* Start calibrating with offsets reset */
-    }
-
-    if (calibrating_)
+    if (imu_state_ == ImuState::CALIBRATING)
     {
         num_samples_++;
         sum_gyro_x += gyro_x;
@@ -97,7 +83,7 @@ void IMU_Node::publishIMUData()
         sum_accl_y += accl_y;
         sum_accl_z += accl_z;
 
-        if (std::chrono::steady_clock::now() - start_time > CALIBRATION_DURATION_SEC * 1s) 
+        if ((this->get_clock()->now() - calibration_start_time_).seconds() >= CALIBRATION_DURATION_SEC)
         {
             sum_gyro_x /= num_samples_;
             sum_gyro_y /= num_samples_;
@@ -114,7 +100,6 @@ void IMU_Node::publishIMUData()
             imu_driver_->setBiasOffsets(-sum_gyro_x, -sum_gyro_y, -sum_gyro_z, -sum_accl_x, -sum_accl_y, -sum_accl_z);
 
             std::cout << " >> Calibration completed" << std::endl;
-            calibrating_ = false;
         }
     }
 }
@@ -124,21 +109,14 @@ void IMU_Node::calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Reques
     (void)request;
     std::cout << "Starting IMU calibration..." << std::endl;
 
-    if (calibrating_) 
+    if (imu_state_ == ImuState::CALIBRATING) 
     {
         response->success = false;
         response->message = "Calibration already in progress";
         return;
     }
 
-    if (calibrate_requested_) 
-    {
-        response->success = false;
-        response->message = "Calibration already requested, waiting for completion";
-        return;
-    }
-
-    calibrate_requested_ = true;
+    imu_state_ = ImuState::CALIBRATING;
 
     sum_gyro_x = 0.0;
     sum_gyro_y = 0.0;
@@ -148,6 +126,7 @@ void IMU_Node::calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Reques
     sum_accl_z = 0.0;
 
     num_samples_ = 0;
+    calibration_start_time_ = this->get_clock()->now();
 
     response->success = true;
     response->message = "Starting calibration process";

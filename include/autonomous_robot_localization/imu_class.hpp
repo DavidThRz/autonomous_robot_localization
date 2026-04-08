@@ -8,7 +8,12 @@
 #include "std_srvs/srv/trigger.hpp"
 
 #define CALIBRATION_DURATION_SEC 15 /* Ensure high precission according to datasheet */
-    
+
+enum class ImuState
+{
+    RUNNING,
+    CALIBRATING
+};
 
 class IMU_Node : public rclcpp::Node
 {
@@ -26,12 +31,12 @@ private:
     rclcpp::TimerBase::SharedPtr timer;
 
     ADIS16460_driver* imu_driver_;
+    ImuState imu_state_;
 
-    bool calibrating_;
-    bool calibrate_requested_;
     double sum_gyro_x, sum_gyro_y, sum_gyro_z;
     double sum_accl_x, sum_accl_y, sum_accl_z;
     uint16_t num_samples_;
+    rclcpp::Time calibration_start_time_;
 };
 
 #endif
