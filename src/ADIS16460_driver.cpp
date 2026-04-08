@@ -173,14 +173,30 @@ void ADIS16460_driver::setBiasOffsets(double gyro_x_offset, double gyro_y_offset
     writeRegister(Z_ACCL_OFF, accl_z_reg);
 }
 
-void ADIS16460_driver::resetBiasOffsets()
+void ADIS16460_driver::getBiasOffsets(double& gyro_x_offset, double& gyro_y_offset, double& gyro_z_offset, double& accl_x_offset, double& accl_y_offset, double& accl_z_offset)
 {
     if (error_state)
         return;
 
-    for (uint8_t reg = X_GYRO_OFF; reg <= Z_ACCL_OFF; reg += 2) 
-    {
-        if (writeRegister(reg, static_cast<uint16_t>(0x0000)) < 0) return;
-    }
+    constexpr double GYRO_SCALE = 0.000625 * C_PI / 180.0;  /* rad/s per LSB */
+    constexpr double ACCL_SCALE = 0.03125 * C_g / 1000.0;   /* mg per LSB */
+
+    uint16_t gyro_x_reg, gyro_y_reg, gyro_z_reg;
+    readRegister(X_GYRO_OFF, gyro_x_reg);
+    readRegister(Y_GYRO_OFF, gyro_y_reg);
+    readRegister(Z_GYRO_OFF, gyro_z_reg);
+
+    gyro_x_offset = static_cast<int16_t>(gyro_x_reg) * GYRO_SCALE;
+    gyro_y_offset = static_cast<int16_t>(gyro_y_reg) * GYRO_SCALE;
+    gyro_z_offset = static_cast<int16_t>(gyro_z_reg) * GYRO_SCALE;
+
+    uint16_t accl_x_reg, accl_y_reg, accl_z_reg;
+    readRegister(X_ACCL_OFF, accl_x_reg);
+    readRegister(Y_ACCL_OFF, accl_y_reg);
+    readRegister(Z_ACCL_OFF, accl_z_reg);
+
+    accl_x_offset = static_cast<int16_t>(accl_x_reg) * ACCL_SCALE;
+    accl_y_offset = static_cast<int16_t>(accl_y_reg) * ACCL_SCALE;
+    accl_z_offset = static_cast<int16_t>(accl_z_reg) * ACCL_SCALE;
 }
 

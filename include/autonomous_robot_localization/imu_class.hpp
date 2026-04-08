@@ -53,6 +53,9 @@ private:
 
     double gyro_x_covariance_, gyro_y_covariance_, gyro_z_covariance_;
     double accl_x_covariance_, accl_y_covariance_, accl_z_covariance_;
+
+    double gyro_x_bias_, gyro_y_bias_, gyro_z_bias_;
+    double accl_x_bias_, accl_y_bias_, accl_z_bias_;
 };
 
 #endif

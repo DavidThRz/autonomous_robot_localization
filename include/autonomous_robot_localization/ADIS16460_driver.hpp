@@ -30,7 +30,7 @@ public:
     void setBiasOffsets(double gyro_x_offset, double gyro_y_offset, double gyro_z_offset, double accl_x_offset, double accl_y_offset, double accl_z_offset);
 
     /* @brief Sets all bias offset registers to zero */
-    void resetBiasOffsets();
+    void getBiasOffsets(double& gyro_x_offset, double& gyro_y_offset, double& gyro_z_offset, double& accl_x_offset, double& accl_y_offset, double& accl_z_offset);
 
 private:
 

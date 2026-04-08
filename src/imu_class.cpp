@@ -122,7 +122,7 @@ void IMU_Node::calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Reques
     num_samples_ = 0;
     calibration_start_time_ = this->get_clock()->now();
 
-    imu_driver_->resetBiasOffsets();
+    imu_driver_->getBiasOffsets(gyro_x_bias_, gyro_y_bias_, gyro_z_bias_, accl_x_bias_, accl_y_bias_, accl_z_bias_);
 
     response->success = true;
     response->message = "Starting calibration process";
@@ -169,12 +169,12 @@ void IMU_Node::computeCalibration(const sensor_msgs::msg::Imu& imu_msg)
     if ((this->get_clock()->now() - calibration_start_time_).seconds() < CALIBRATION_DURATION_SEC)
         return;
 
-    sum_gyro_x /= num_samples_;
-    sum_gyro_y /= num_samples_;
-    sum_gyro_z /= num_samples_;
-    sum_accl_x /= num_samples_;
-    sum_accl_y /= num_samples_;
-    sum_accl_z /= num_samples_;
+    sum_gyro_x = sum_gyro_x / num_samples_ - gyro_x_bias_;
+    sum_gyro_y = sum_gyro_y / num_samples_ - gyro_y_bias_;
+    sum_gyro_z = sum_gyro_z / num_samples_ - gyro_z_bias_;
+    sum_accl_x = sum_accl_x / num_samples_ - accl_x_bias_;
+    sum_accl_y = sum_accl_y / num_samples_ - accl_y_bias_;
+    sum_accl_z = sum_accl_z / num_samples_ - accl_z_bias_;
     sum_accl_z += C_g; /* Remove gravity from Z axis */
 
     std::cout << " >> Calibration results (bias estimates):" << std::endl;
