@@ -2,6 +2,9 @@
 #include "autonomous_robot_localization/imu_class.hpp"
 
 #include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <ctime>
 using namespace std::chrono_literals;
 
 IMU_Node::IMU_Node() : Node("imu_node"), imu_driver_(nullptr)
@@ -9,6 +12,7 @@ IMU_Node::IMU_Node() : Node("imu_node"), imu_driver_(nullptr)
     this->declare_parameter<std::string>("spi_device", "/dev/spidev0.0");
     this->declare_parameter<int>("publish_rate_freq", 10);
     this->declare_parameter<std::string>("frame_id", "imu_link");
+    this->declare_parameter<std::string>("covariance_file", "");
 
     const std::string spi_device = this->get_parameter("spi_device").as_string();
     imu_driver_ = new ADIS16460_driver(spi_device);
@@ -46,8 +50,41 @@ IMU_Node::IMU_Node() : Node("imu_node"), imu_driver_(nullptr)
     sum_accl_x = sum_accl_y = sum_accl_z = 0.0;
     num_samples_ = 0;
 
+    /* Default covariance values (conservative estimates) */
     gyro_x_covariance_ = gyro_y_covariance_ = gyro_z_covariance_ = 1.0e-6;
     accl_x_covariance_ = accl_y_covariance_ = accl_z_covariance_ = 1.0e-3;
+
+    /* Resolve covariance file path */
+    covariance_file_path_ = this->get_parameter("covariance_file").as_string();
+    if (covariance_file_path_.empty())
+    {
+        const char* home = std::getenv("HOME");
+        if (home)
+        {
+            covariance_file_path_ = std::string(home) + "/.ros/imu_covariance_calibration.yaml";
+        }
+        else
+        {
+            covariance_file_path_ = "/tmp/imu_covariance_calibration.yaml";
+            RCLCPP_WARN(this->get_logger(), "HOME not set, using fallback path: %s", covariance_file_path_.c_str());
+        }
+    }
+    RCLCPP_INFO(this->get_logger(), "Covariance file path: %s", covariance_file_path_.c_str());
+
+    /* Attempt to load previously calibrated covariances from file */
+    if (loadCovariancesFromFile())
+    {
+        RCLCPP_INFO(this->get_logger(), 
+            "Loaded covariances from file — Gyro: [%.3e, %.3e, %.3e], Accl: [%.3e, %.3e, %.3e]",
+            gyro_x_covariance_, gyro_y_covariance_, gyro_z_covariance_,
+            accl_x_covariance_, accl_y_covariance_, accl_z_covariance_);
+    }
+    else
+    {
+        RCLCPP_WARN(this->get_logger(), 
+            "No covariance calibration file found, using default values. "
+            "Run the covariance calibration service to generate calibration data.");
+    }
 
     imu_state_ = ImuState::RUNNING;
 
@@ -246,6 +283,177 @@ void IMU_Node::computeCovariancesCalibration(const sensor_msgs::msg::Imu& imu_ms
     accl_y_covariance_ = accl_y_var;
     accl_z_covariance_ = accl_z_var;
 
+    /* Persist covariances to file for reuse across restarts */
+    if (saveCovariancesToFile())
+    {
+        RCLCPP_INFO(this->get_logger(), "Covariance calibration data saved to: %s", covariance_file_path_.c_str());
+    }
+    else
+    {
+        RCLCPP_ERROR(this->get_logger(), "Failed to save covariance calibration data to: %s", covariance_file_path_.c_str());
+    }
+
     std::cout << " >> Covariance calibration completed" << std::endl;
     imu_state_ = ImuState::RUNNING;
+}
+
+bool IMU_Node::loadCovariancesFromFile()
+{
+    if (!std::filesystem::exists(covariance_file_path_))
+    {
+        return false;
+    }
+
+    try
+    {
+        YAML::Node config = YAML::LoadFile(covariance_file_path_);
+
+        if (!config["calibration"])
+        {
+            RCLCPP_WARN(this->get_logger(), "Covariance file exists but missing 'calibration' key: %s", covariance_file_path_.c_str());
+            return false;
+        }
+
+        YAML::Node calibration = config["calibration"];
+
+        /* Load angular velocity covariances */
+        if (calibration["angular_velocity_covariance"])
+        {
+            YAML::Node gyro_cov = calibration["angular_velocity_covariance"];
+            gyro_x_covariance_ = gyro_cov["x"].as<double>();
+            gyro_y_covariance_ = gyro_cov["y"].as<double>();
+            gyro_z_covariance_ = gyro_cov["z"].as<double>();
+        }
+        else
+        {
+            RCLCPP_WARN(this->get_logger(), "Covariance file missing 'angular_velocity_covariance' section");
+            return false;
+        }
+
+        /* Load linear acceleration covariances */
+        if (calibration["linear_acceleration_covariance"])
+        {
+            YAML::Node accl_cov = calibration["linear_acceleration_covariance"];
+            accl_x_covariance_ = accl_cov["x"].as<double>();
+            accl_y_covariance_ = accl_cov["y"].as<double>();
+            accl_z_covariance_ = accl_cov["z"].as<double>();
+        }
+        else
+        {
+            RCLCPP_WARN(this->get_logger(), "Covariance file missing 'linear_acceleration_covariance' section");
+            return false;
+        }
+
+        /* Log calibration metadata if available */
+        if (calibration["timestamp"])
+        {
+            RCLCPP_INFO(this->get_logger(), "Covariance calibration was performed at: %s", 
+                calibration["timestamp"].as<std::string>().c_str());
+        }
+        if (calibration["num_samples"])
+        {
+            RCLCPP_INFO(this->get_logger(), "Calibration used %d samples", 
+                calibration["num_samples"].as<int>());
+        }
+
+        return true;
+    }
+    catch (const YAML::ParserException& e)
+    {
+        RCLCPP_ERROR(this->get_logger(), "Failed to parse covariance file '%s': %s", 
+            covariance_file_path_.c_str(), e.what());
+        return false;
+    }
+    catch (const YAML::BadConversion& e)
+    {
+        RCLCPP_ERROR(this->get_logger(), "Invalid data type in covariance file '%s': %s", 
+            covariance_file_path_.c_str(), e.what());
+        return false;
+    }
+    catch (const std::exception& e)
+    {
+        RCLCPP_ERROR(this->get_logger(), "Unexpected error loading covariance file '%s': %s", 
+            covariance_file_path_.c_str(), e.what());
+        return false;
+    }
+}
+
+bool IMU_Node::saveCovariancesToFile()
+{
+    try
+    {
+        /* Create parent directories if they don't exist */
+        std::filesystem::path file_path(covariance_file_path_);
+        if (file_path.has_parent_path())
+        {
+            std::filesystem::create_directories(file_path.parent_path());
+        }
+
+        /* Generate ISO 8601 timestamp */
+        auto now = std::chrono::system_clock::now();
+        auto time_t_now = std::chrono::system_clock::to_time_t(now);
+        std::tm tm_now{};
+        gmtime_r(&time_t_now, &tm_now);
+        std::ostringstream timestamp_ss;
+        timestamp_ss << std::put_time(&tm_now, "%Y-%m-%dT%H:%M:%SZ");
+
+        /* Build YAML document using Emitter for guaranteed valid output */
+        YAML::Emitter out;
+        out << YAML::Comment("IMU Covariance Calibration Data - Auto-generated by imu_node");
+        out << YAML::Comment("DO NOT EDIT MANUALLY unless you know what you are doing");
+        out << YAML::BeginMap;
+        out << YAML::Key << "calibration" << YAML::Value;
+        out << YAML::BeginMap;
+
+        out << YAML::Key << "timestamp" << YAML::Value << timestamp_ss.str();
+        out << YAML::Key << "num_samples" << YAML::Value << static_cast<int>(num_samples_);
+        out << YAML::Key << "duration_sec" << YAML::Value << static_cast<double>(CALIBRATION_DURATION_SEC);
+
+        out << YAML::Key << "angular_velocity_covariance" << YAML::Value;
+        out << YAML::BeginMap;
+        out << YAML::Key << "x" << YAML::Value << gyro_x_covariance_;
+        out << YAML::Key << "y" << YAML::Value << gyro_y_covariance_;
+        out << YAML::Key << "z" << YAML::Value << gyro_z_covariance_;
+        out << YAML::EndMap;
+
+        out << YAML::Key << "linear_acceleration_covariance" << YAML::Value;
+        out << YAML::BeginMap;
+        out << YAML::Key << "x" << YAML::Value << accl_x_covariance_;
+        out << YAML::Key << "y" << YAML::Value << accl_y_covariance_;
+        out << YAML::Key << "z" << YAML::Value << accl_z_covariance_;
+        out << YAML::EndMap;
+
+        out << YAML::EndMap;
+        out << YAML::EndMap;
+
+        /* Write to file atomically: write to temp file first, then rename */
+        std::string temp_path = covariance_file_path_ + ".tmp";
+        std::ofstream fout(temp_path);
+        if (!fout.is_open())
+        {
+            RCLCPP_ERROR(this->get_logger(), "Cannot open file for writing: %s", temp_path.c_str());
+            return false;
+        }
+
+        fout << out.c_str() << std::endl;
+        fout.close();
+
+        if (fout.fail())
+        {
+            RCLCPP_ERROR(this->get_logger(), "Error writing to file: %s", temp_path.c_str());
+            std::filesystem::remove(temp_path);
+            return false;
+        }
+
+        /* Atomic rename to prevent corruption if interrupted mid-write */
+        std::filesystem::rename(temp_path, covariance_file_path_);
+
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        RCLCPP_ERROR(this->get_logger(), "Failed to save covariance file '%s': %s", 
+            covariance_file_path_.c_str(), e.what());
+        return false;
+    }
 }

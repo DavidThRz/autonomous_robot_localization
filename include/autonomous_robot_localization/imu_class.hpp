@@ -7,6 +7,9 @@
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_srvs/srv/trigger.hpp"
 
+#include <yaml-cpp/yaml.h>
+#include <filesystem>
+
 #define CALIBRATION_DURATION_SEC 15 /* Ensure high precission according to datasheet */
 
 enum class ImuState
@@ -34,6 +37,10 @@ private:
 
     void computeCovariancesCalibration(const sensor_msgs::msg::Imu& imu_msg);
 
+    /* Covariance persistence methods */
+    bool loadCovariancesFromFile();
+    bool saveCovariancesToFile();
+
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr calibration_service;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr covariance_calibration_service;
@@ -56,6 +63,8 @@ private:
 
     double gyro_x_bias_, gyro_y_bias_, gyro_z_bias_;
     double accl_x_bias_, accl_y_bias_, accl_z_bias_;
+
+    std::string covariance_file_path_;
 };
 
 #endif
