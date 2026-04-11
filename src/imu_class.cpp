@@ -180,22 +180,11 @@ void IMU_Node::calibrateIMUCovariances(const std::shared_ptr<std_srvs::srv::Trig
 
     imu_state_ = ImuState::CALIBRATING_COVARIANCES;
 
-    gyro_x_samples.clear();
-    gyro_y_samples.clear();
-    gyro_z_samples.clear();
-    accl_x_samples.clear();
-    accl_y_samples.clear();
-    accl_z_samples.clear();
-
-    /* Pre-allocate sample vectors to avoid reallocations during data collection */
-    const size_t expected_samples = static_cast<size_t>(
-        this->get_parameter("publish_rate_freq").as_int() * kCalibrationDurationSec);
-    gyro_x_samples.reserve(expected_samples);
-    gyro_y_samples.reserve(expected_samples);
-    gyro_z_samples.reserve(expected_samples);
-    accl_x_samples.reserve(expected_samples);
-    accl_y_samples.reserve(expected_samples);
-    accl_z_samples.reserve(expected_samples);
+    /* Initialize Welford's running statistics */
+    mean_gyro_x_ = mean_gyro_y_ = mean_gyro_z_ = 0.0;
+    mean_accl_x_ = mean_accl_y_ = mean_accl_z_ = 0.0;
+    m2_gyro_x_ = m2_gyro_y_ = m2_gyro_z_ = 0.0;
+    m2_accl_x_ = m2_accl_y_ = m2_accl_z_ = 0.0;
 
     num_samples_ = 0;
     calibration_start_time_ = this->get_clock()->now();
@@ -240,48 +229,48 @@ void IMU_Node::computeCovariancesCalibration(const sensor_msgs::msg::Imu& imu_ms
 {
     num_samples_++;
 
-    gyro_x_samples.push_back(imu_msg.angular_velocity.x);
-    gyro_y_samples.push_back(imu_msg.angular_velocity.y);
-    gyro_z_samples.push_back(imu_msg.angular_velocity.z);
-    accl_x_samples.push_back(imu_msg.linear_acceleration.x);
-    accl_y_samples.push_back(imu_msg.linear_acceleration.y);
-    accl_z_samples.push_back(imu_msg.linear_acceleration.z);
+    /* Welford's Online Algorithm for variance computation */
+    /* Gyro X */
+    double delta_gyro_x = imu_msg.angular_velocity.x - mean_gyro_x_;
+    mean_gyro_x_ += delta_gyro_x / num_samples_;
+    m2_gyro_x_ += delta_gyro_x * (imu_msg.angular_velocity.x - mean_gyro_x_);
+
+    /* Gyro Y */
+    double delta_gyro_y = imu_msg.angular_velocity.y - mean_gyro_y_;
+    mean_gyro_y_ += delta_gyro_y / num_samples_;
+    m2_gyro_y_ += delta_gyro_y * (imu_msg.angular_velocity.y - mean_gyro_y_);
+
+    /* Gyro Z */
+    double delta_gyro_z = imu_msg.angular_velocity.z - mean_gyro_z_;
+    mean_gyro_z_ += delta_gyro_z / num_samples_;
+    m2_gyro_z_ += delta_gyro_z * (imu_msg.angular_velocity.z - mean_gyro_z_);
+
+    /* Accl X */
+    double delta_accl_x = imu_msg.linear_acceleration.x - mean_accl_x_;
+    mean_accl_x_ += delta_accl_x / num_samples_;
+    m2_accl_x_ += delta_accl_x * (imu_msg.linear_acceleration.x - mean_accl_x_);
+
+    /* Accl Y */
+    double delta_accl_y = imu_msg.linear_acceleration.y - mean_accl_y_;
+    mean_accl_y_ += delta_accl_y / num_samples_;
+    m2_accl_y_ += delta_accl_y * (imu_msg.linear_acceleration.y - mean_accl_y_);
+
+    /* Accl Z */
+    double delta_accl_z = imu_msg.linear_acceleration.z - mean_accl_z_;
+    mean_accl_z_ += delta_accl_z / num_samples_;
+    m2_accl_z_ += delta_accl_z * (imu_msg.linear_acceleration.z - mean_accl_z_);
 
     if ((this->get_clock()->now() - calibration_start_time_).seconds() < kCalibrationDurationSec)
         return;
 
-    double gyro_x_var = 0.0, gyro_y_var = 0.0, gyro_z_var = 0.0;
-    double accl_x_var = 0.0, accl_y_var = 0.0, accl_z_var = 0.0;
-
-    sum_gyro_x = std::accumulate(gyro_x_samples.begin(), gyro_x_samples.end(), 0.0);
-    sum_gyro_y = std::accumulate(gyro_y_samples.begin(), gyro_y_samples.end(), 0.0);
-    sum_gyro_z = std::accumulate(gyro_z_samples.begin(), gyro_z_samples.end(), 0.0);
-    sum_accl_x = std::accumulate(accl_x_samples.begin(), accl_x_samples.end(), 0.0);
-    sum_accl_y = std::accumulate(accl_y_samples.begin(), accl_y_samples.end(), 0.0);
-    sum_accl_z = std::accumulate(accl_z_samples.begin(), accl_z_samples.end(), 0.0);
-    double mean_gyro_x = sum_gyro_x / num_samples_;
-    double mean_gyro_y = sum_gyro_y / num_samples_;
-    double mean_gyro_z = sum_gyro_z / num_samples_;
-    double mean_accl_x = sum_accl_x / num_samples_;
-    double mean_accl_y = sum_accl_y / num_samples_;
-    double mean_accl_z = sum_accl_z / num_samples_;
-
-    for (size_t i = 0; i < gyro_x_samples.size(); ++i) 
-    {
-        gyro_x_var += std::pow(gyro_x_samples[i] - mean_gyro_x, 2);
-        gyro_y_var += std::pow(gyro_y_samples[i] - mean_gyro_y, 2);
-        gyro_z_var += std::pow(gyro_z_samples[i] - mean_gyro_z, 2);
-        accl_x_var += std::pow(accl_x_samples[i] - mean_accl_x, 2);
-        accl_y_var += std::pow(accl_y_samples[i] - mean_accl_y, 2);
-        accl_z_var += std::pow(accl_z_samples[i] - mean_accl_z, 2);
-    }
-
-    gyro_x_var /= (num_samples_ - 1);
-    gyro_y_var /= (num_samples_ - 1);
-    gyro_z_var /= (num_samples_ - 1);
-    accl_x_var /= (num_samples_ - 1);
-    accl_y_var /= (num_samples_ - 1);
-    accl_z_var /= (num_samples_ - 1);
+    /* Compute final sample variance: sum of squared differences / (n - 1) */
+    double div = static_cast<double>(num_samples_ - 1);
+    double gyro_x_var = m2_gyro_x_ / div;
+    double gyro_y_var = m2_gyro_y_ / div;
+    double gyro_z_var = m2_gyro_z_ / div;
+    double accl_x_var = m2_accl_x_ / div;
+    double accl_y_var = m2_accl_y_ / div;
+    double accl_z_var = m2_accl_z_ / div;
 
     RCLCPP_INFO(this->get_logger(), "Covariance calibration results (variance estimates):");
     RCLCPP_INFO(this->get_logger(), "  Gyro variance (rad/s)^2: x=%.3e, y=%.3e, z=%.3e", gyro_x_var, gyro_y_var, gyro_z_var);

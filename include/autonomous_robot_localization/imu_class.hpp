@@ -56,8 +56,11 @@ private:
     double sum_gyro_x, sum_gyro_y, sum_gyro_z;
     double sum_accl_x, sum_accl_y, sum_accl_z;
 
-    std::vector<double> gyro_x_samples, gyro_y_samples, gyro_z_samples;
-    std::vector<double> accl_x_samples, accl_y_samples, accl_z_samples;
+    /* Welford's online algorithm running statistics */
+    double mean_gyro_x_, mean_gyro_y_, mean_gyro_z_;
+    double mean_accl_x_, mean_accl_y_, mean_accl_z_;
+    double m2_gyro_x_, m2_gyro_y_, m2_gyro_z_;
+    double m2_accl_x_, m2_accl_y_, m2_accl_z_;
 
     uint16_t num_samples_;
     rclcpp::Time calibration_start_time_;
