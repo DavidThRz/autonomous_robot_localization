@@ -64,6 +64,7 @@ private:
     double gyro_x_bias_, gyro_y_bias_, gyro_z_bias_;
     double accl_x_bias_, accl_y_bias_, accl_z_bias_;
 
+    std::string frame_id_;
     std::string covariance_file_path_;
 };
 

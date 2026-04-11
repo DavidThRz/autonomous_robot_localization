@@ -14,6 +14,8 @@ IMU_Node::IMU_Node() : Node("imu_node"), imu_driver_(nullptr)
     this->declare_parameter<std::string>("frame_id", "imu_link");
     this->declare_parameter<std::string>("covariance_file", "");
 
+    frame_id_ = this->get_parameter("frame_id").as_string();
+
     const std::string spi_device = this->get_parameter("spi_device").as_string();
     imu_driver_ = new ADIS16460_driver(spi_device);
     if (!imu_driver_->testImu()) 
@@ -110,7 +112,7 @@ void IMU_Node::publishIMUData()
 
     sensor_msgs::msg::Imu imu_msg;
     imu_msg.header.stamp = this->get_clock()->now();
-    imu_msg.header.frame_id = "imu_link";
+    imu_msg.header.frame_id = frame_id_;
     imu_msg.angular_velocity.x = gyro_x;
     imu_msg.angular_velocity.y = gyro_y;
     imu_msg.angular_velocity.z = gyro_z;
