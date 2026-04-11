@@ -138,7 +138,7 @@ void IMU_Node::publishIMUData()
 void IMU_Node::calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
     (void)request;
-    std::cout << "Starting IMU calibration..." << std::endl;
+    RCLCPP_INFO(this->get_logger(), "Starting IMU calibration...");
 
     if (imu_state_ == ImuState::CALIBRATING || imu_state_ == ImuState::CALIBRATING_COVARIANCES) 
     {
@@ -168,7 +168,7 @@ void IMU_Node::calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Reques
 void IMU_Node::calibrateIMUCovariances(const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
     (void)request;
-    std::cout << "Starting IMU covariance calibration..." << std::endl;
+    RCLCPP_INFO(this->get_logger(), "Starting IMU covariance calibration...");
 
     if (imu_state_ == ImuState::CALIBRATING || imu_state_ == ImuState::CALIBRATING_COVARIANCES) 
     {
@@ -214,13 +214,13 @@ void IMU_Node::computeCalibration(const sensor_msgs::msg::Imu& imu_msg)
     sum_accl_z = sum_accl_z / num_samples_ - accl_z_bias_;
     sum_accl_z += C_g; /* Remove gravity from Z axis */
 
-    std::cout << " >> Calibration results (bias estimates):" << std::endl;
-    std::cout << " >> Gyro bias (º/s): x=" << sum_gyro_x << ", y=" << sum_gyro_y << ", z=" << sum_gyro_z << std::endl;
-    std::cout << " >> Accel bias (mg): x=" << sum_accl_x << ", y=" << sum_accl_y << ", z=" << sum_accl_z << std::endl;
+    RCLCPP_INFO(this->get_logger(), "Calibration results (bias estimates):");
+    RCLCPP_INFO(this->get_logger(), "  Gyro bias (rad/s): x=%.6f, y=%.6f, z=%.6f", sum_gyro_x, sum_gyro_y, sum_gyro_z);
+    RCLCPP_INFO(this->get_logger(), "  Accel bias (m/s2): x=%.6f, y=%.6f, z=%.6f", sum_accl_x, sum_accl_y, sum_accl_z);
 
     imu_driver_->setBiasOffsets(-sum_gyro_x, -sum_gyro_y, -sum_gyro_z, -sum_accl_x, -sum_accl_y, -sum_accl_z);
 
-    std::cout << " >> Calibration completed" << std::endl;
+    RCLCPP_INFO(this->get_logger(), "Calibration completed");
     imu_state_ = ImuState::RUNNING;
 
 }
@@ -272,9 +272,9 @@ void IMU_Node::computeCovariancesCalibration(const sensor_msgs::msg::Imu& imu_ms
     accl_y_var /= (num_samples_ - 1);
     accl_z_var /= (num_samples_ - 1);
 
-    std::cout << " >> Covariance calibration results (variance estimates):" << std::endl;
-    std::cout << " >> Gyro variance (º/s)^2: x=" << gyro_x_var << ", y=" << gyro_y_var << ", z=" << gyro_z_var << std::endl;
-    std::cout << " >> Accel variance (mg)^2: x=" << accl_x_var << ", y=" << accl_y_var << ", z=" << accl_z_var << std::endl;
+    RCLCPP_INFO(this->get_logger(), "Covariance calibration results (variance estimates):");
+    RCLCPP_INFO(this->get_logger(), "  Gyro variance (rad/s)^2: x=%.3e, y=%.3e, z=%.3e", gyro_x_var, gyro_y_var, gyro_z_var);
+    RCLCPP_INFO(this->get_logger(), "  Accel variance (m/s2)^2: x=%.3e, y=%.3e, z=%.3e", accl_x_var, accl_y_var, accl_z_var);
 
     gyro_x_covariance_ = gyro_x_var;
     gyro_y_covariance_ = gyro_y_var;
@@ -293,7 +293,7 @@ void IMU_Node::computeCovariancesCalibration(const sensor_msgs::msg::Imu& imu_ms
         RCLCPP_ERROR(this->get_logger(), "Failed to save covariance calibration data to: %s", covariance_file_path_.c_str());
     }
 
-    std::cout << " >> Covariance calibration completed" << std::endl;
+    RCLCPP_INFO(this->get_logger(), "Covariance calibration completed");
     imu_state_ = ImuState::RUNNING;
 }
 
