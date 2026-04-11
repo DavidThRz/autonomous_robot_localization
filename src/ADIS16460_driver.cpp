@@ -3,14 +3,14 @@
 
 ADIS16460_driver::ADIS16460_driver(const std::string& spi_device)
 {
-    isp_device = spi_device.c_str();
+    spi_device_ = spi_device;
     error_state = false;
 
-    isp_fd = open(isp_device, O_RDWR);
+    isp_fd = open(spi_device_.c_str(), O_RDWR);
     if (isp_fd < 0) 
     {
         error_state = true;
-        std::cerr << "Error: opening " << isp_device << ".\n";
+        std::cerr << "Error: opening " << spi_device_ << ".\n";
         return;
     }
 
@@ -114,7 +114,7 @@ int ADIS16460_driver::sendSPI(uint8_t reg, uint8_t value, uint16_t* response)
 bool ADIS16460_driver::testImu()
 {
     uint16_t value;
-    if (readRegister(0x56, value) == 1) 
+    if (readRegister(0x56, value) < 0) 
         return false;
 
     if (value != 0x404C) 

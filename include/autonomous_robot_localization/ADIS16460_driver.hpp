@@ -40,7 +40,7 @@ private:
 
     int sendSPI(uint8_t reg, uint8_t value = 0x00, uint16_t* response = nullptr);
 
-    const char* isp_device;
+    std::string spi_device_;
     int isp_fd;
 
     bool error_state;
