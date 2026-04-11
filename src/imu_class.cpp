@@ -7,7 +7,7 @@
 #include <ctime>
 using namespace std::chrono_literals;
 
-IMU_Node::IMU_Node() : Node("imu_node"), imu_driver_(nullptr)
+IMU_Node::IMU_Node() : Node("imu_node")
 {    
     this->declare_parameter<std::string>("spi_device", "/dev/spidev0.0");
     this->declare_parameter<int>("publish_rate_freq", 10);
@@ -17,7 +17,7 @@ IMU_Node::IMU_Node() : Node("imu_node"), imu_driver_(nullptr)
     frame_id_ = this->get_parameter("frame_id").as_string();
 
     const std::string spi_device = this->get_parameter("spi_device").as_string();
-    imu_driver_ = new ADIS16460_driver(spi_device);
+    imu_driver_ = std::make_unique<ADIS16460_driver>(spi_device);
     if (!imu_driver_->testImu()) 
     {
         RCLCPP_FATAL(this->get_logger(), "IMU not responding correctly at startup. Exiting.");
@@ -96,7 +96,6 @@ IMU_Node::IMU_Node() : Node("imu_node"), imu_driver_(nullptr)
 IMU_Node::~IMU_Node()
 {
     RCLCPP_INFO(this->get_logger(), "Finalizing IMU node");
-    delete imu_driver_;
 }
 
 void IMU_Node::publishIMUData()
@@ -188,6 +187,16 @@ void IMU_Node::calibrateIMUCovariances(const std::shared_ptr<std_srvs::srv::Trig
     accl_y_samples.clear();
     accl_z_samples.clear();
 
+    /* Pre-allocate sample vectors to avoid reallocations during data collection */
+    const size_t expected_samples = static_cast<size_t>(
+        this->get_parameter("publish_rate_freq").as_int() * kCalibrationDurationSec);
+    gyro_x_samples.reserve(expected_samples);
+    gyro_y_samples.reserve(expected_samples);
+    gyro_z_samples.reserve(expected_samples);
+    accl_x_samples.reserve(expected_samples);
+    accl_y_samples.reserve(expected_samples);
+    accl_z_samples.reserve(expected_samples);
+
     num_samples_ = 0;
     calibration_start_time_ = this->get_clock()->now();
 
@@ -205,7 +214,7 @@ void IMU_Node::computeCalibration(const sensor_msgs::msg::Imu& imu_msg)
     sum_accl_y += imu_msg.linear_acceleration.y;
     sum_accl_z += imu_msg.linear_acceleration.z;
 
-    if ((this->get_clock()->now() - calibration_start_time_).seconds() < CALIBRATION_DURATION_SEC)
+    if ((this->get_clock()->now() - calibration_start_time_).seconds() < kCalibrationDurationSec)
         return;
 
     sum_gyro_x = sum_gyro_x / num_samples_ - gyro_x_bias_;
@@ -238,7 +247,7 @@ void IMU_Node::computeCovariancesCalibration(const sensor_msgs::msg::Imu& imu_ms
     accl_y_samples.push_back(imu_msg.linear_acceleration.y);
     accl_z_samples.push_back(imu_msg.linear_acceleration.z);
 
-    if ((this->get_clock()->now() - calibration_start_time_).seconds() < CALIBRATION_DURATION_SEC)
+    if ((this->get_clock()->now() - calibration_start_time_).seconds() < kCalibrationDurationSec)
         return;
 
     double gyro_x_var = 0.0, gyro_y_var = 0.0, gyro_z_var = 0.0;
@@ -409,7 +418,7 @@ bool IMU_Node::saveCovariancesToFile()
 
         out << YAML::Key << "timestamp" << YAML::Value << timestamp_ss.str();
         out << YAML::Key << "num_samples" << YAML::Value << static_cast<int>(num_samples_);
-        out << YAML::Key << "duration_sec" << YAML::Value << static_cast<double>(CALIBRATION_DURATION_SEC);
+        out << YAML::Key << "duration_sec" << YAML::Value << static_cast<double>(kCalibrationDurationSec);
 
         out << YAML::Key << "angular_velocity_covariance" << YAML::Value;
         out << YAML::BeginMap;

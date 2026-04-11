@@ -9,8 +9,9 @@
 
 #include <yaml-cpp/yaml.h>
 #include <filesystem>
+#include <memory>
 
-#define CALIBRATION_DURATION_SEC 15 /* Ensure high precission according to datasheet */
+
 
 enum class ImuState
 {
@@ -24,6 +25,9 @@ class IMU_Node : public rclcpp::Node
 public:
     IMU_Node();
     ~IMU_Node();
+
+    /* Calibration duration in seconds — per ADIS16460 datasheet recommendation */
+    static constexpr int kCalibrationDurationSec = 15;
 
     void publishIMUData();
 
@@ -46,7 +50,7 @@ private:
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr covariance_calibration_service;
     rclcpp::TimerBase::SharedPtr timer;
 
-    ADIS16460_driver* imu_driver_;
+    std::unique_ptr<ADIS16460_driver> imu_driver_;
     ImuState imu_state_;
 
     double sum_gyro_x, sum_gyro_y, sum_gyro_z;
