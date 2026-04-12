@@ -10,32 +10,28 @@ ADIS16460_driver::ADIS16460_driver(const std::string& spi_device)
     if (isp_fd < 0) 
     {
         error_state = true;
-        std::cerr << "Error: opening " << spi_device_ << ".\n";
-        return;
+        throw std::runtime_error("Error: opening " + spi_device_);
     }
 
     uint8_t spi_mode = SPI_MODE_3; /* ADIS16460 uses CPOL=1 CPHA=1 */
     if (ioctl(isp_fd, SPI_IOC_WR_MODE, &spi_mode) < 0) 
     {
         error_state = true;
-        std::cerr << "Error: setting SPI mode.\n";
-        return;
+        throw std::runtime_error("Error: setting SPI mode.");
     }
 
     imu_bits_per_word = 8;
     if (ioctl(isp_fd, SPI_IOC_WR_BITS_PER_WORD, &imu_bits_per_word) < 0) 
     {
         error_state = true;
-        std::cerr << "Error: setting bits per word.\n";
-        return;
+        throw std::runtime_error("Error: setting bits per word.");
     }
 
     imu_frequency_hz = 1000000;
     if (ioctl(isp_fd, SPI_IOC_WR_MAX_SPEED_HZ, &imu_frequency_hz) < 0) 
     {
         error_state = true;
-        std::cerr << "Error: setting max speed.\n";
-        return;
+        throw std::runtime_error("Error: setting max speed.");
     }
 }
 
@@ -53,7 +49,7 @@ int ADIS16460_driver::readRegister(uint8_t reg, uint16_t &value)
 
     if (sendSPI(reg) < 0)
         return -1;
-    usleep(16);
+    usleep(kSpiStallTimeUs);
     if (sendSPI(0x00, 0x00, &value) < 0)
         return -1;
 
@@ -106,8 +102,7 @@ int ADIS16460_driver::sendSPI(uint8_t reg, uint8_t value, uint16_t* response)
 
     if (ioctl(isp_fd, SPI_IOC_MESSAGE(1), &tr) < 1) 
     {
-        std::cerr << "Error: SPI communication failed.\n";
-        return -1;
+        throw std::runtime_error("Error: SPI communication failed.");
     }
 
     if (response) 
@@ -130,8 +125,8 @@ bool ADIS16460_driver::testImu()
 
 bool ADIS16460_driver::getIMUData(double &gyro_x, double &gyro_y, double &gyro_z, double &accl_x, double &accl_y, double &accl_z)
 {
-    constexpr double GYRO_SCALE = 0.005 * C_PI / 180.0;  /* rad/s per LSB */
-    constexpr double ACCL_SCALE = 0.25 * C_g / 1000.0;   /* mg per LSB */
+    constexpr double GYRO_SCALE = 0.005 * kPi / 180.0;  /* rad/s per LSB */
+    constexpr double ACCL_SCALE = 0.25 * kGravity / 1000.0;   /* mg per LSB */
 
     uint16_t raw_x, raw_y, raw_z;
     if (readRegister(X_GYRO_OUT, raw_x) < 0) return false;
@@ -158,8 +153,8 @@ bool ADIS16460_driver::setBiasOffsets(double gyro_x_offset, double gyro_y_offset
     if (error_state)
         return false;
 
-    constexpr double GYRO_OFFSET_SCALE = 0.000625 * C_PI / 180.0;  /* rad/s per LSB */
-    constexpr double ACCL_OFFSET_SCALE = 0.03125 * C_g / 1000.0;   /* mg per LSB */
+    constexpr double GYRO_OFFSET_SCALE = 0.000625 * kPi / 180.0;  /* rad/s per LSB */
+    constexpr double ACCL_OFFSET_SCALE = 0.03125 * kGravity / 1000.0;   /* mg per LSB */
 
     uint16_t gyro_x_reg = static_cast<int>(gyro_x_offset / GYRO_OFFSET_SCALE);
     uint16_t gyro_y_reg = static_cast<int>(gyro_y_offset / GYRO_OFFSET_SCALE);
@@ -185,8 +180,8 @@ bool ADIS16460_driver::getBiasOffsets(double& gyro_x_offset, double& gyro_y_offs
     if (error_state)
         return false;
 
-    constexpr double GYRO_SCALE = 0.000625 * C_PI / 180.0;  /* rad/s per LSB */
-    constexpr double ACCL_SCALE = 0.03125 * C_g / 1000.0;   /* mg per LSB */
+    constexpr double GYRO_SCALE = 0.000625 * kPi / 180.0;  /* rad/s per LSB */
+    constexpr double ACCL_SCALE = 0.03125 * kGravity / 1000.0;   /* mg per LSB */
 
     uint16_t gyro_x_reg, gyro_y_reg, gyro_z_reg;
     if (readRegister(X_GYRO_OFF, gyro_x_reg) < 0) return false;

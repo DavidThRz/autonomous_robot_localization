@@ -17,13 +17,21 @@ IMU_Node::IMU_Node() : Node("imu_node")
     frame_id_ = this->get_parameter("frame_id").as_string();
 
     const std::string spi_device = this->get_parameter("spi_device").as_string();
-    imu_driver_ = std::make_unique<ADIS16460_driver>(spi_device);
-    if (!imu_driver_->testImu()) 
+    try 
     {
-        RCLCPP_FATAL(this->get_logger(), "IMU not responding correctly at startup. Exiting.");
+        imu_driver_ = std::make_unique<ADIS16460_driver>(spi_device);
+        if (!imu_driver_->testImu()) 
+        {
+            RCLCPP_FATAL(this->get_logger(), "IMU not responding correctly at startup. Exiting.");
+            throw std::runtime_error("IMU initialization failed");
+        }
+    }
+    catch (const std::exception& e)
+    {
+        RCLCPP_FATAL(this->get_logger(), "IMU driver error: %s", e.what());
         throw std::runtime_error("IMU initialization failed");
     }
-    RCLCPP_INFO(this->get_logger(), "IMU detected and initialized successfully.");
+    RCLCPP_INOF(this->get_logger(), "IMU detected and initialized successfully.");
     
     uint16_t publish_rate_freq_ = this->get_parameter("publish_rate_freq").as_int();
 
@@ -219,7 +227,7 @@ void IMU_Node::computeCalibration(const sensor_msgs::msg::Imu& imu_msg)
     sum_accl_x = sum_accl_x / num_samples_ - accl_x_bias_;
     sum_accl_y = sum_accl_y / num_samples_ - accl_y_bias_;
     sum_accl_z = sum_accl_z / num_samples_ - accl_z_bias_;
-    sum_accl_z += C_g; /* Remove gravity from Z axis */
+    sum_accl_z += ADIS16460_driver::kGravity; /* Remove gravity from Z axis */
 
     RCLCPP_INFO(this->get_logger(), "Calibration results (bias estimates):");
     RCLCPP_INFO(this->get_logger(), "  Gyro bias (rad/s): x=%.6f, y=%.6f, z=%.6f", sum_gyro_x, sum_gyro_y, sum_gyro_z);
