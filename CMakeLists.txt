@@ -20,10 +20,9 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 # --- Photographer node ---
-add_executable(photographer_node src/photographer.cpp)
+add_executable(photographer_node src/camera/photographer.cpp)
 target_include_directories(photographer_node PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/camera/include>
     ${libcamera_INCLUDE_DIRS}
 )
 ament_target_dependencies(photographer_node rclcpp sensor_msgs)
@@ -33,11 +32,10 @@ target_link_libraries(photographer_node
 )
 
 # --- Visual odometry node ---
-add_executable(visual_node src/visual_odometry.cpp)
+add_executable(visual_node src/camera/visual_odometry.cpp)
 # 3. CORRECCIÓN: Typo arreglado (PUBLIC_ -> PUBLIC)
 target_include_directories(visual_node PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/camera/include>
 )
 ament_target_dependencies(visual_node rclcpp sensor_msgs geometry_msgs)
 target_link_libraries(visual_node
@@ -45,10 +43,9 @@ target_link_libraries(visual_node
 )
 
 # --- Streaming node ---
-add_executable(streaming_node src/streaming_node.cpp)
+add_executable(streaming_node src/camera/streaming_node.cpp)
 target_include_directories(streaming_node PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/camera/include>
     ${libcamera_INCLUDE_DIRS} # 4. CORRECCIÓN: Añadido acceso a libcamera
 )
 ament_target_dependencies(streaming_node rclcpp sensor_msgs)
@@ -61,8 +58,7 @@ target_link_libraries(streaming_node
 # --- Mapper node ---
 add_executable(mapper_node src/mapper.cpp)
 target_include_directories(mapper_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 ament_target_dependencies(mapper_node rclcpp sensor_msgs geometry_msgs)
 target_link_libraries(mapper_node
@@ -70,10 +66,9 @@ target_link_libraries(mapper_node
 )
 
 # --- IMU node ---
-add_executable(imu_node src/imu_node.cpp src/imu_class.cpp src/ADIS16460_driver.cpp)
+add_executable(imu_node src/imu/imu_node.cpp src/imu/imu_class.cpp src/imu/ADIS16460_driver.cpp)
 target_include_directories(imu_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/imu/include>
 )
 ament_target_dependencies(imu_node rclcpp sensor_msgs std_srvs)
 target_link_libraries(imu_node yaml-cpp)

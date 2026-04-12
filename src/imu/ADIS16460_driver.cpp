@@ -1,5 +1,5 @@
 
-#include "autonomous_robot_localization/ADIS16460_driver.hpp"
+#include "ADIS16460_driver.hpp"
 
 ADIS16460_driver::ADIS16460_driver(const std::string& spi_device)
 {
