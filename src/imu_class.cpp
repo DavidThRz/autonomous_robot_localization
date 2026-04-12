@@ -160,7 +160,14 @@ void IMU_Node::calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Reques
     num_samples_ = 0;
     calibration_start_time_ = this->get_clock()->now();
 
-    imu_driver_->getBiasOffsets(gyro_x_bias_, gyro_y_bias_, gyro_z_bias_, accl_x_bias_, accl_y_bias_, accl_z_bias_);
+    if (!imu_driver_->getBiasOffsets(gyro_x_bias_, gyro_y_bias_, gyro_z_bias_, accl_x_bias_, accl_y_bias_, accl_z_bias_))
+    {
+        RCLCPP_ERROR(this->get_logger(), "Failed to read current bias offsets from IMU");
+        imu_state_ = ImuState::RUNNING;
+        response->success = false;
+        response->message = "Failed to read bias offsets from IMU";
+        return;
+    }
 
     response->success = true;
     response->message = "Starting calibration process";
@@ -218,7 +225,10 @@ void IMU_Node::computeCalibration(const sensor_msgs::msg::Imu& imu_msg)
     RCLCPP_INFO(this->get_logger(), "  Gyro bias (rad/s): x=%.6f, y=%.6f, z=%.6f", sum_gyro_x, sum_gyro_y, sum_gyro_z);
     RCLCPP_INFO(this->get_logger(), "  Accel bias (m/s2): x=%.6f, y=%.6f, z=%.6f", sum_accl_x, sum_accl_y, sum_accl_z);
 
-    imu_driver_->setBiasOffsets(-sum_gyro_x, -sum_gyro_y, -sum_gyro_z, -sum_accl_x, -sum_accl_y, -sum_accl_z);
+    if (!imu_driver_->setBiasOffsets(-sum_gyro_x, -sum_gyro_y, -sum_gyro_z, -sum_accl_x, -sum_accl_y, -sum_accl_z))
+    {
+        RCLCPP_ERROR(this->get_logger(), "Failed to write bias offsets to IMU");
+    }
 
     RCLCPP_INFO(this->get_logger(), "Calibration completed");
     imu_state_ = ImuState::RUNNING;

@@ -27,10 +27,10 @@ public:
     bool getIMUData(double &gyro_x, double &gyro_y, double &gyro_z, double &accl_x, double &accl_y, double &accl_z);
 
     /* @brief Sets the bias offset values for each axis */
-    void setBiasOffsets(double gyro_x_offset, double gyro_y_offset, double gyro_z_offset, double accl_x_offset, double accl_y_offset, double accl_z_offset);
+    bool setBiasOffsets(double gyro_x_offset, double gyro_y_offset, double gyro_z_offset, double accl_x_offset, double accl_y_offset, double accl_z_offset);
 
     /* @brief Sets all bias offset registers to zero */
-    void getBiasOffsets(double& gyro_x_offset, double& gyro_y_offset, double& gyro_z_offset, double& accl_x_offset, double& accl_y_offset, double& accl_z_offset);
+    bool getBiasOffsets(double& gyro_x_offset, double& gyro_y_offset, double& gyro_z_offset, double& accl_x_offset, double& accl_y_offset, double& accl_z_offset);
 
 private:
 

@@ -41,7 +41,7 @@ ADIS16460_driver::ADIS16460_driver(const std::string& spi_device)
 
 ADIS16460_driver::~ADIS16460_driver()
 {
-    if (!error_state) {
+    if (isp_fd >= 0) {
         close(isp_fd);
     }
 }
@@ -51,9 +51,11 @@ int ADIS16460_driver::readRegister(uint8_t reg, uint16_t &value)
     if (error_state)
         return -1;
 
-    sendSPI(reg);
+    if (sendSPI(reg) < 0)
+        return -1;
     usleep(16);
-    sendSPI(0x00, 0x00, &value);
+    if (sendSPI(0x00, 0x00, &value) < 0)
+        return -1;
 
     return 0;
 }
@@ -64,7 +66,8 @@ int ADIS16460_driver::writeRegister(uint8_t reg, uint8_t value)
         return -1;
 
     reg |= 0x80;
-    sendSPI(reg, value);
+    if (sendSPI(reg, value) < 0)
+        return -1;
 
     return 0;
 }
@@ -75,8 +78,10 @@ int ADIS16460_driver::writeRegister(uint8_t reg, uint16_t value)
         return -1;
 
     reg |= 0x80;
-    sendSPI(reg, value & 0xFF);
-    sendSPI(reg + 1, (value >> 8) & 0xFF);
+    if (sendSPI(reg, value & 0xFF) < 0)
+        return -1;
+    if (sendSPI(reg + 1, (value >> 8) & 0xFF) < 0)
+        return -1;
 
     return 0;
 }
@@ -114,7 +119,7 @@ int ADIS16460_driver::sendSPI(uint8_t reg, uint8_t value, uint16_t* response)
 bool ADIS16460_driver::testImu()
 {
     uint16_t value;
-    if (readRegister(0x56, value) < 0) 
+    if (readRegister(PROD_ID, value) < 0) 
         return false;
 
     if (value != 0x404C) 
@@ -148,10 +153,10 @@ bool ADIS16460_driver::getIMUData(double &gyro_x, double &gyro_y, double &gyro_z
     return true;
 }
 
-void ADIS16460_driver::setBiasOffsets(double gyro_x_offset, double gyro_y_offset, double gyro_z_offset, double accl_x_offset, double accl_y_offset, double accl_z_offset)
+bool ADIS16460_driver::setBiasOffsets(double gyro_x_offset, double gyro_y_offset, double gyro_z_offset, double accl_x_offset, double accl_y_offset, double accl_z_offset)
 {
     if (error_state)
-        return;
+        return false;
 
     constexpr double GYRO_OFFSET_SCALE = 0.000625 * C_PI / 180.0;  /* rad/s per LSB */
     constexpr double ACCL_OFFSET_SCALE = 0.03125 * C_g / 1000.0;   /* mg per LSB */
@@ -160,43 +165,47 @@ void ADIS16460_driver::setBiasOffsets(double gyro_x_offset, double gyro_y_offset
     uint16_t gyro_y_reg = static_cast<int>(gyro_y_offset / GYRO_OFFSET_SCALE);
     uint16_t gyro_z_reg = static_cast<int>(gyro_z_offset / GYRO_OFFSET_SCALE);
 
-    writeRegister(X_GYRO_OFF, gyro_x_reg);
-    writeRegister(Y_GYRO_OFF, gyro_y_reg);
-    writeRegister(Z_GYRO_OFF, gyro_z_reg);
+    if (writeRegister(X_GYRO_OFF, gyro_x_reg) < 0) return false;
+    if (writeRegister(Y_GYRO_OFF, gyro_y_reg) < 0) return false;
+    if (writeRegister(Z_GYRO_OFF, gyro_z_reg) < 0) return false;
 
     uint16_t accl_x_reg = static_cast<int>(accl_x_offset / ACCL_OFFSET_SCALE);
     uint16_t accl_y_reg = static_cast<int>(accl_y_offset / ACCL_OFFSET_SCALE);
     uint16_t accl_z_reg = static_cast<int>(accl_z_offset / ACCL_OFFSET_SCALE);
 
-    writeRegister(X_ACCL_OFF, accl_x_reg);
-    writeRegister(Y_ACCL_OFF, accl_y_reg);
-    writeRegister(Z_ACCL_OFF, accl_z_reg);
+    if (writeRegister(X_ACCL_OFF, accl_x_reg) < 0) return false;
+    if (writeRegister(Y_ACCL_OFF, accl_y_reg) < 0) return false;
+    if (writeRegister(Z_ACCL_OFF, accl_z_reg) < 0) return false;
+
+    return true;
 }
 
-void ADIS16460_driver::getBiasOffsets(double& gyro_x_offset, double& gyro_y_offset, double& gyro_z_offset, double& accl_x_offset, double& accl_y_offset, double& accl_z_offset)
+bool ADIS16460_driver::getBiasOffsets(double& gyro_x_offset, double& gyro_y_offset, double& gyro_z_offset, double& accl_x_offset, double& accl_y_offset, double& accl_z_offset)
 {
     if (error_state)
-        return;
+        return false;
 
     constexpr double GYRO_SCALE = 0.000625 * C_PI / 180.0;  /* rad/s per LSB */
     constexpr double ACCL_SCALE = 0.03125 * C_g / 1000.0;   /* mg per LSB */
 
     uint16_t gyro_x_reg, gyro_y_reg, gyro_z_reg;
-    readRegister(X_GYRO_OFF, gyro_x_reg);
-    readRegister(Y_GYRO_OFF, gyro_y_reg);
-    readRegister(Z_GYRO_OFF, gyro_z_reg);
+    if (readRegister(X_GYRO_OFF, gyro_x_reg) < 0) return false;
+    if (readRegister(Y_GYRO_OFF, gyro_y_reg) < 0) return false;
+    if (readRegister(Z_GYRO_OFF, gyro_z_reg) < 0) return false;
 
     gyro_x_offset = static_cast<int16_t>(gyro_x_reg) * GYRO_SCALE;
     gyro_y_offset = static_cast<int16_t>(gyro_y_reg) * GYRO_SCALE;
     gyro_z_offset = static_cast<int16_t>(gyro_z_reg) * GYRO_SCALE;
 
     uint16_t accl_x_reg, accl_y_reg, accl_z_reg;
-    readRegister(X_ACCL_OFF, accl_x_reg);
-    readRegister(Y_ACCL_OFF, accl_y_reg);
-    readRegister(Z_ACCL_OFF, accl_z_reg);
+    if (readRegister(X_ACCL_OFF, accl_x_reg) < 0) return false;
+    if (readRegister(Y_ACCL_OFF, accl_y_reg) < 0) return false;
+    if (readRegister(Z_ACCL_OFF, accl_z_reg) < 0) return false;
 
     accl_x_offset = static_cast<int16_t>(accl_x_reg) * ACCL_SCALE;
     accl_y_offset = static_cast<int16_t>(accl_y_reg) * ACCL_SCALE;
     accl_z_offset = static_cast<int16_t>(accl_z_reg) * ACCL_SCALE;
+
+    return true;
 }
 
