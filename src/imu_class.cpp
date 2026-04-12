@@ -31,16 +31,16 @@ IMU_Node::IMU_Node() : Node("imu_node")
         RCLCPP_FATAL(this->get_logger(), "IMU driver error: %s", e.what());
         throw std::runtime_error("IMU initialization failed");
     }
-    RCLCPP_INOF(this->get_logger(), "IMU detected and initialized successfully.");
+    RCLCPP_INFO(this->get_logger(), "IMU detected and initialized successfully.");
     
-    uint16_t publish_rate_freq_ = this->get_parameter("publish_rate_freq").as_int();
+    int publish_rate_freq = this->get_parameter("publish_rate_freq").as_int();
 
     imu_publisher = 
         this->create_publisher<sensor_msgs::msg::Imu>("imu/data", 10);
 
     timer = 
         this->create_wall_timer(
-        std::chrono::milliseconds(1000 / publish_rate_freq_),
+        std::chrono::microseconds(1000000 / publish_rate_freq),
         std::bind(&IMU_Node::publishIMUData, this)
     );
 
@@ -126,12 +126,15 @@ void IMU_Node::publishIMUData()
     imu_msg.linear_acceleration.x = accl_x;
     imu_msg.linear_acceleration.y = accl_y;
     imu_msg.linear_acceleration.z = accl_z;
+    imu_msg.orientation_covariance[0] = -1.0;
+    imu_msg.orientation_covariance[4] = -1.0;
+    imu_msg.orientation_covariance[8] = -1.0;
     imu_msg.angular_velocity_covariance[0] = gyro_x_covariance_;
     imu_msg.angular_velocity_covariance[4] = gyro_y_covariance_;
     imu_msg.angular_velocity_covariance[8] = gyro_z_covariance_;
     imu_msg.linear_acceleration_covariance[0] = accl_x_covariance_;
     imu_msg.linear_acceleration_covariance[4] = accl_y_covariance_;
-    imu_msg.linear_acceleration_covariance[8] = accl_z_covariance_;
+    imu_msg.linear_acceleration_covariance[8] = accl_z_covariance_;   
     imu_publisher->publish(imu_msg);
 
     if (imu_state_ == ImuState::CALIBRATING)

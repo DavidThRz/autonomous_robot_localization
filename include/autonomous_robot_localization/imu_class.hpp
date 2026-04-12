@@ -26,6 +26,8 @@ public:
     IMU_Node();
     ~IMU_Node();
 
+private:
+
     /* Calibration duration in seconds — per ADIS16460 datasheet recommendation */
     static constexpr int kCalibrationDurationSec = 15;
 
@@ -34,8 +36,6 @@ public:
     void calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response);
 
     void calibrateIMUCovariances(const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response);
-
-private:
 
     void computeCalibration(const sensor_msgs::msg::Imu& imu_msg);
 
