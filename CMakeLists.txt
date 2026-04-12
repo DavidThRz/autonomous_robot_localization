@@ -11,12 +11,11 @@ find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
-
-# 1. CORRECCIÓN: Paquete PkgConfig obligatorio antes de buscar libcamera
 find_package(PkgConfig REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(yaml-cpp REQUIRED)
 pkg_check_modules(libcamera REQUIRED libcamera)
 
-# 2. CORRECCIÓN: Búsqueda moderna y segura de la librería de hilos para httplib
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
@@ -70,18 +69,29 @@ target_link_libraries(mapper_node
   ${OpenCV_LIBRARIES}
 )
 
+# --- IMU node ---
+add_executable(imu_node src/imu_node.cpp src/imu_class.cpp src/ADIS16460_driver.cpp)
+target_include_directories(imu_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(imu_node rclcpp sensor_msgs std_srvs)
+target_link_libraries(imu_node yaml-cpp)
+
 # Installation
 install(TARGETS 
   photographer_node
   visual_node
   streaming_node
   mapper_node
+  imu_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# Launchers
-install(DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}
+install(DIRECTORY
+  config
+  launch
+  DESTINATION share/${PROJECT_NAME}/
 )
 
 # Exporta el paquete
