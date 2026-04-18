@@ -14,6 +14,7 @@
 
 #include "httplib.h"
 #include <mutex>
+#include <condition_variable>
 #include <filesystem>
 
 using std::placeholders::_1;
@@ -62,15 +63,19 @@ public:
         std::cout << "Map found, sending to stream..." << std::endl;
 
         cv::Mat map_color = cv::imread(map_dir.string(), cv::IMREAD_COLOR);
-        std::lock_guard<std::mutex> lock(frame_mutex_);
-        stream_frame_ = map_color.clone();
-        new_frame_ = true;
+        {
+            std::lock_guard<std::mutex> lock(frame_mutex_);
+            stream_frame_ = map_color.clone();
+            new_frame_ = true;
+        }
+        cv_frame_.notify_all();
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
     ~StreamingNode()
     {
         stop_flag_ = true;
+        cv_frame_.notify_all();
         if (server_thread_.joinable())
             server_thread_.join();
     }
@@ -91,6 +96,7 @@ private:
 
     cv::Mat stream_frame_;
     std::mutex frame_mutex_;
+    std::condition_variable cv_frame_;
 
     std::atomic<bool> stop_flag_;
     std::atomic<bool> new_frame_;
@@ -114,6 +120,7 @@ void StreamingNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         stream_frame_ = gray_img.clone();
         new_frame_ = true;
     }
+    cv_frame_.notify_one();
 }
 
 void StreamingNode::streamServer()
@@ -148,16 +155,13 @@ void StreamingNode::handleStream(const httplib::Request&, httplib::Response& res
         
         while(!stop_flag_)
         {
-            //TODO: evitar dormir el thread
-            if (!new_frame_)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                continue;
-            }
-
             cv::Mat frame;
             {
-                std::lock_guard<std::mutex> lock(frame_mutex_);
+                std::unique_lock<std::mutex> lock(frame_mutex_);
+                cv_frame_.wait(lock, [this] { return new_frame_.load() || stop_flag_.load(); });
+                
+                if (stop_flag_) break;
+
                 frame = stream_frame_.clone();
                 new_frame_ = false;
             }
