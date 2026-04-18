@@ -64,6 +64,10 @@ private:
     sensor_msgs::msg::Image stream_msg_;
     bool stream_status_active_;
 
+    int skip_frames_aux_{0};
+    cv::Mat prev_frame_;
+    state_space_t position_{0.0, 0.0, 0.0};
+
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
 
@@ -226,18 +230,22 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     #define SKIP_FRAMES 20
 
-    static int aux = 0;
-    if ( aux++ < SKIP_FRAMES)
+    if (skip_frames_aux_++ < SKIP_FRAMES)
         return;
 
     new_frame_ = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
 
-    static cv::Mat prev_frame = new_frame_.clone();
+    if (prev_frame_.empty()) 
+    {
+        prev_frame_ = new_frame_.clone();
+        return;
+    }
+
     std::vector<cv::Point2f> prev_pts, curr_pts;
 
-    // computeOpticalFlowFarneback(prev_frame, new_frame_, prev_pts, curr_pts);
-    computeOpticalFlowLK(prev_frame, new_frame_, prev_pts, curr_pts);
-    prev_frame = new_frame_.clone();
+    // computeOpticalFlowFarneback(prev_frame_, new_frame_, prev_pts, curr_pts);
+    computeOpticalFlowLK(prev_frame_, new_frame_, prev_pts, curr_pts);
+    prev_frame_ = new_frame_.clone();
 
     removeOutliers(prev_pts, curr_pts);
 
@@ -249,20 +257,19 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     }
 
     state_space_t vel = computeVelocity(prev_pts, curr_pts);
-    static state_space_t position = {0.0, 0.0, 0.0};
 
-    position.linear_x += vel.linear_x;
-    position.linear_y += vel.linear_y;
-    position.angular_z += vel.angular_z;
+    position_.linear_x += vel.linear_x;
+    position_.linear_y += vel.linear_y;
+    position_.angular_z += vel.angular_z;
 
     if (true)   // TODO: send only when map stream is active
     {
         geometry_msgs::msg::PoseStamped  pose_msg;
         pose_msg.header.frame_id = "map";
         pose_msg.header.stamp = msg->header.stamp;
-        pose_msg.pose.position.x = position.linear_x;
-        pose_msg.pose.position.y = position.linear_y;
-        pose_msg.pose.orientation.z = position.angular_z;
+        pose_msg.pose.position.x = position_.linear_x;
+        pose_msg.pose.position.y = position_.linear_y;
+        pose_msg.pose.orientation.z = position_.angular_z;
         pose_pub_->publish(pose_msg);
     }
 
