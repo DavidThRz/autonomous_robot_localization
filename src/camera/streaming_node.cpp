@@ -47,8 +47,15 @@ public:
                             "autonomous_robot_localization" / 
                             "data" /
                             "robot_path_map.png";
+        
+        auto start_wait = std::chrono::steady_clock::now();
         while (!fs::exists(map_dir))
         {
+            if (std::chrono::steady_clock::now() - start_wait >= std::chrono::seconds(20))
+            {
+                std::cout << "Timeout (20s) reached. Map not generated. Shutdown aborting stream." << std::endl;
+                return;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             std::cout << "waiting for map generation to finish..." << std::endl;
         }
