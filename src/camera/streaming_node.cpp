@@ -26,6 +26,10 @@ public:
     
     StreamingNode() : Node("streaming_node"), stop_flag_(false), new_frame_(false)
     {
+        namespace fs = std::filesystem;
+        std::string default_dir = (fs::path(std::getenv("HOME")) / "autonomous_robot_localization" / "data").string();
+        this->declare_parameter<std::string>("data_dir", default_dir);
+
         rclcpp::QoS qos(3);
         qos.reliable();
         qos.durability_volatile();
@@ -44,10 +48,8 @@ public:
     void onShutdown()
     {
         namespace fs = std::filesystem;
-        const fs::path map_dir = fs::path(std::getenv("HOME")) / 
-                            "autonomous_robot_localization" / 
-                            "data" /
-                            "robot_path_map.png";
+        std::string data_dir = this->get_parameter("data_dir").as_string();
+        const fs::path map_dir = fs::path(data_dir) / "robot_path_map.png";
         
         auto start_wait = std::chrono::steady_clock::now();
         while (!fs::exists(map_dir))

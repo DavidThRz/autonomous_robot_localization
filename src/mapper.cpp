@@ -26,7 +26,9 @@ public:
         this->declare_parameter<std::string>("output_file", "robot_path.csv");
         std::string filename = this->get_parameter("output_file").as_string();
         
-        fs::path data_dir = fs::path(std::getenv("HOME")) / "autonomous_robot_localization" / "data";
+        std::string default_dir = (fs::path(std::getenv("HOME")) / "autonomous_robot_localization" / "data").string();
+        this->declare_parameter<std::string>("data_dir", default_dir);
+        fs::path data_dir = fs::path(this->get_parameter("data_dir").as_string());
         if (!fs::exists(data_dir))
         {
             fs::create_directories(data_dir);
@@ -131,15 +133,15 @@ void MapperNode::generateMap()
     }
 
     /* Map allignment design */
-    #define IMG_HEIGHT      1000
-    #define IMG_WIDTH       1000
-    #define MARGIN_RIGHT    50
-    #define MARGIN_TOP      100
-    #define MARGIN_LEFT     110
-    #define MARGIN_BOTTOM   65
-    const int title_space = MARGIN_TOP - 20;
-    const int drawable_x = IMG_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
-    const int drawable_y = IMG_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
+    constexpr int kImgHeight      = 1000;
+    constexpr int kImgWidth       = 1000;
+    constexpr int kMarginRight    = 50;
+    constexpr int kMarginTop      = 100;
+    constexpr int kMarginLeft     = 110;
+    constexpr int kMarginBottom   = 65;
+    const int title_space = kMarginTop - 20;
+    const int drawable_x = kImgWidth - kMarginLeft - kMarginRight;
+    const int drawable_y = kImgHeight - kMarginTop - kMarginBottom;
 
     /* Read poses from .csv */
     std::ifstream in_file(file_path_.string());
@@ -219,12 +221,12 @@ void MapperNode::generateMap()
     std::cout << "======================================" << std::endl;
 
     /* Prepare canvas */
-    cv::Mat img(IMG_HEIGHT, IMG_WIDTH, CV_8UC3, cv::Scalar(255, 255, 255));
+    cv::Mat img(kImgHeight, kImgWidth, CV_8UC3, cv::Scalar(255, 255, 255));
     
     auto toPixel = [&](double x, double y) -> cv::Point 
     {
-        int px = static_cast<int>(MARGIN_LEFT + (x - min_x + off_x) / scale * drawable_x);
-        int py = static_cast<int>(IMG_HEIGHT - MARGIN_BOTTOM - (y - min_y + off_y) / scale * drawable_y);
+        int px = static_cast<int>(kMarginLeft + (x - min_x + off_x) / scale * drawable_x);
+        int py = static_cast<int>(kImgHeight - kMarginBottom - (y - min_y + off_y) / scale * drawable_y);
         return {px, py};
     };
 
@@ -234,17 +236,17 @@ void MapperNode::generateMap()
     cv::Scalar grid_color(220, 220, 220);
     for (int i = 0; i <= num_divisions; ++i) 
     {
-        int offset_x = MARGIN_LEFT + i * drawable_x / num_divisions;
-        int offset_y = MARGIN_TOP + i * drawable_y / num_divisions;
+        int offset_x = kMarginLeft + i * drawable_x / num_divisions;
+        int offset_y = kMarginTop + i * drawable_y / num_divisions;
 
-        cv::line(img, {offset_x, MARGIN_TOP}, {offset_x, IMG_HEIGHT - MARGIN_BOTTOM}, grid_color, 1);
-        cv::line(img, {MARGIN_LEFT, offset_y}, {IMG_WIDTH - MARGIN_RIGHT, offset_y}, grid_color, 1);
+        cv::line(img, {offset_x, kMarginTop}, {offset_x, kImgHeight - kMarginBottom}, grid_color, 1);
+        cv::line(img, {kMarginLeft, offset_y}, {kImgWidth - kMarginRight, offset_y}, grid_color, 1);
 
         double world_x = min_x + (double)i / num_divisions * scale - off_x;
         std::ostringstream label_x;
         label_x << std::fixed << std::setprecision(3) << world_x << "px";
         cv::putText(img, label_x.str(),
-                    {offset_x - 18, IMG_HEIGHT - MARGIN_BOTTOM + 20},
+                    {offset_x - 18, kImgHeight - kMarginBottom + 20},
                     cv::FONT_HERSHEY_SIMPLEX, 0.35, {80, 80, 80}, 1, cv::LINE_AA);
 
         double world_y = min_y + (1.0 - (double)i / num_divisions) * scale - off_y;
@@ -255,16 +257,16 @@ void MapperNode::generateMap()
                     cv::FONT_HERSHEY_SIMPLEX, 0.35, {80, 80, 80}, 1, cv::LINE_AA);
     }
 
-    int px_0 = static_cast<int>(MARGIN_LEFT - min_x / scale * drawable_x + off_x / scale * drawable_x);
-    int py_0 = static_cast<int>(IMG_HEIGHT - MARGIN_BOTTOM + min_y / scale * drawable_y - off_y / scale * drawable_y);
-    cv::line(img, {px_0, MARGIN_TOP}, {px_0, IMG_HEIGHT - MARGIN_BOTTOM}, grid_color, 2);
-    cv::line(img, {MARGIN_LEFT, py_0}, {IMG_WIDTH - MARGIN_RIGHT, py_0}, grid_color, 2);
+    int px_0 = static_cast<int>(kMarginLeft - min_x / scale * drawable_x + off_x / scale * drawable_x);
+    int py_0 = static_cast<int>(kImgHeight - kMarginBottom + min_y / scale * drawable_y - off_y / scale * drawable_y);
+    cv::line(img, {px_0, kMarginTop}, {px_0, kImgHeight - kMarginBottom}, grid_color, 2);
+    cv::line(img, {kMarginLeft, py_0}, {kImgWidth - kMarginRight, py_0}, grid_color, 2);
 
     cv::rectangle(img, 
-                {MARGIN_LEFT, MARGIN_TOP}, {IMG_WIDTH - MARGIN_RIGHT, IMG_HEIGHT - MARGIN_BOTTOM},
+                {kMarginLeft, kMarginTop}, {kImgWidth - kMarginRight, kImgHeight - kMarginBottom},
                 cv::Scalar(150, 150, 150), 1);
 
-    cv::putText(img, "X (px)", {IMG_WIDTH / 2 - 15, IMG_HEIGHT - 17},
+    cv::putText(img, "X (px)", {kImgWidth / 2 - 15, kImgHeight - 17},
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, {50, 50, 50}, 1, cv::LINE_AA);
 
     cv::Mat y_label(30, 60, CV_8UC3, cv::Scalar(255, 255, 255));
@@ -272,7 +274,7 @@ void MapperNode::generateMap()
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, {50, 50, 50}, 1, cv::LINE_AA);
     cv::Mat y_rotated;
     cv::rotate(y_label, y_rotated, cv::ROTATE_90_COUNTERCLOCKWISE);
-    y_rotated.copyTo(img(cv::Rect(0, IMG_HEIGHT / 2 - 30, y_rotated.cols, y_rotated.rows)));
+    y_rotated.copyTo(img(cv::Rect(0, kImgHeight / 2 - 30, y_rotated.cols, y_rotated.rows)));
 
     /* Trayectory */
     double t0 = poses.front().timestamp;
@@ -310,12 +312,12 @@ void MapperNode::generateMap()
 
     /* Legend */
     const int bar_y = title_space / 2;
-    const int legend_init_x = IMG_WIDTH - 220;
+    const int legend_init_x = kImgWidth - 220;
     const int legend_end_x = legend_init_x + 80;
 
-    cv::rectangle(img, {0, 0}, {IMG_WIDTH, title_space},
+    cv::rectangle(img, {0, 0}, {kImgWidth, title_space},
             cv::Scalar(235, 235, 205), -1);
-    cv::line(img, {0, title_space}, {IMG_WIDTH, title_space},
+    cv::line(img, {0, title_space}, {kImgWidth, title_space},
             cv::Scalar(200, 200, 200), 1);
 
     cv::putText(img,
