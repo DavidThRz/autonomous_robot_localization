@@ -68,6 +68,8 @@ public:
         pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
             "odometry/position", 10, std::bind(&MapperNode::poseCallback, this, _1));
 
+        rclcpp::on_shutdown([this]() { this->generateMap(); });
+
         RCLCPP_INFO(this->get_logger(), "Mapper node started - Logging to: %s", file_path_.c_str());
     }
 
@@ -77,8 +79,6 @@ public:
         {
             csv_file_.close();
             RCLCPP_INFO(this->get_logger(), "CSV file closed. Total poses logged: %zu", pose_count_);
-
-            generateMap();
         }
     }
 
@@ -123,6 +123,13 @@ void MapperNode::poseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr m
 
 void MapperNode::generateMap()
 {
+    if (csv_file_.is_open())
+    {
+        csv_file_.flush();
+        csv_file_.close();
+        RCLCPP_INFO(this->get_logger(), "CSV file closed for map generation. Total poses logged: %zu", pose_count_);
+    }
+
     /* Map allignment design */
     #define IMG_HEIGHT      1000
     #define IMG_WIDTH       1000
@@ -141,6 +148,13 @@ void MapperNode::generateMap()
     std::cout << "Generating map from logged poses..." << std::endl;
 
     std::string line;
+    
+    // Skip the first line (CSV Header)
+    if (std::getline(in_file, line)) 
+    {
+        /* Log header skip if needed */
+    }
+
     while (std::getline(in_file, line))
     {
         if (line.empty()) continue;
