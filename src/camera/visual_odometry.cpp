@@ -42,6 +42,9 @@ public:
         stream_status_sub_ = 
             create_subscription<std_msgs::msg::Bool>("status/stream", qos, std::bind(&VisualNode::streamStatusCallback, this, std::placeholders::_1));
 
+        this->declare_parameter<double>("focal_length_mm", 3.6);
+        this->declare_parameter<double>("pixel_size_um", 1.4);
+        this->declare_parameter<double>("camera_height_m", 0.097);
 
         stream_msg_.header.frame_id = "camera_frame";
         stream_msg_.encoding = "mono8";
@@ -175,62 +178,42 @@ void VisualNode::computeOpticalFlowLK(const cv::Mat& prev_frame, const cv::Mat& 
     curr_pts.resize(write);
 }
 
-static state_space_t computeVelocity(const std::vector<cv::Point2f>& prev_pts, const std::vector<cv::Point2f>& curr_pts)
+static state_space_t computeVelocity(const std::vector<cv::Point2f>& prev_pts, const std::vector<cv::Point2f>& curr_pts, double scale)
 {
     if (prev_pts.size() != curr_pts.size() || prev_pts.empty())
         return state_space_t{0.0, 0.0, 0.0};
 
-    cv::Point2f mass_center_prev(0.0f, 0.0f);
-    cv::Point2f mass_center_curr(0.0f, 0.0f);
-    for (size_t i = 0; i < prev_pts.size(); ++i)
-    {
-        mass_center_prev += prev_pts[i];
-        mass_center_curr += curr_pts[i];
-    }
-    mass_center_prev *= (1.0f / prev_pts.size());
-    mass_center_curr *= (1.0f / curr_pts.size());
-    cv::Point2f velocity = mass_center_curr - mass_center_prev;
-
-    #define MOV_THRESHOLD 0.01
-    velocity.x = std::fabs(velocity.x) > MOV_THRESHOLD ? velocity.x : 0.0f;
-    velocity.y = std::fabs(velocity.y) > MOV_THRESHOLD ? velocity.y : 0.0f;
-
-    if (velocity.x == 0.0f && velocity.y == 0.0f)
+    cv::Mat M = cv::estimateAffinePartial2D(prev_pts, curr_pts, cv::noArray(), cv::LMEDS);
+    
+    if (M.empty())
         return state_space_t{0.0, 0.0, 0.0};
 
-    velocity.y *= -1;
+    double t_x = M.at<double>(0, 2);
+    double t_y = M.at<double>(1, 2);
 
-    double yaw_velocity = 0;
-    std::vector<cv::Mat> vector_prev, vector_curr;
-    for (size_t i = 0; i < prev_pts.size(); ++i) 
-    {
-        cv::Mat prev = (cv::Mat_<double>(2,1) << prev_pts[i].x - mass_center_prev.x, prev_pts[i].y - mass_center_prev.y);
-        cv::Mat curr = (cv::Mat_<double>(2,1) << curr_pts[i].x - mass_center_curr.x, curr_pts[i].y - mass_center_curr.y);
-        vector_prev.push_back(prev);
-        vector_curr.push_back(curr);
-    }
-    cv::Mat R = cv::Mat::zeros(2, 2, CV_64F);
-    for (size_t i = 0; i < vector_prev.size(); ++i) 
-    {
-        R += vector_curr[i] * vector_prev[i].t();
-    }
-    R /= static_cast<double>(vector_prev.size());
-    cv::SVD svd(R);
-    cv::Mat R_ortho = svd.u * svd.vt;
-    yaw_velocity = atan2(R_ortho.at<double>(1,0), R_ortho.at<double>(0,0));
+    constexpr double kMovThreshold = 0.1;
+    t_x = std::fabs(t_x) > kMovThreshold ? t_x : 0.0;
+    t_y = std::fabs(t_y) > kMovThreshold ? t_y : 0.0;
+
+    if (t_x == 0.0 && t_y == 0.0)
+        return state_space_t{0.0, 0.0, 0.0};
+
+    t_y *= -1;
+
+    double yaw_velocity = std::atan2(M.at<double>(1, 0), M.at<double>(0, 0));
 
     state_space_t vel;
-    vel.linear_x = velocity.x;
-    vel.linear_y = velocity.y;
+    vel.linear_x = t_x * scale;
+    vel.linear_y = t_y * scale;
     vel.angular_z = yaw_velocity;
     return vel;
 }
 
 void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
-    #define SKIP_FRAMES 20
+    constexpr int kSkipFrames = 20;
 
-    if (skip_frames_aux_++ < SKIP_FRAMES)
+    if (skip_frames_aux_++ < kSkipFrames)
         return;
 
     new_frame_ = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
@@ -256,22 +239,24 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         cv::circle(new_frame_, curr_pts[i], 2, cv::Scalar(0, 255, 0), -1);
     }
 
-    state_space_t vel = computeVelocity(prev_pts, curr_pts);
+    double camera_height_m = this->get_parameter("camera_height_m").as_double();
+
+    double focal_length_px = 1290;
+    double scale = camera_height_m / focal_length_px;
+
+    state_space_t vel = computeVelocity(prev_pts, curr_pts, scale);
 
     position_.linear_x += vel.linear_x;
     position_.linear_y += vel.linear_y;
     position_.angular_z += vel.angular_z;
 
-    if (true)   // TODO: send only when map stream is active
-    {
-        geometry_msgs::msg::PoseStamped  pose_msg;
-        pose_msg.header.frame_id = "map";
-        pose_msg.header.stamp = msg->header.stamp;
-        pose_msg.pose.position.x = position_.linear_x;
-        pose_msg.pose.position.y = position_.linear_y;
-        pose_msg.pose.orientation.z = position_.angular_z;
-        pose_pub_->publish(pose_msg);
-    }
+    geometry_msgs::msg::PoseStamped  pose_msg;
+    pose_msg.header.frame_id = "map";
+    pose_msg.header.stamp = msg->header.stamp;
+    pose_msg.pose.position.x = position_.linear_x;
+    pose_msg.pose.position.y = position_.linear_y;
+    pose_msg.pose.orientation.z = position_.angular_z;
+    pose_pub_->publish(pose_msg);
 
     if (stream_status_active_)
     {
