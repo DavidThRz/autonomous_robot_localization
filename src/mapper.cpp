@@ -68,7 +68,7 @@ public:
         csv_file_ << "timestamp,x,y,theta" << std::endl;
 
         pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-            "odometry/position", 10, std::bind(&MapperNode::poseCallback, this, _1));
+            "ekf/pose", 10, std::bind(&MapperNode::poseCallback, this, _1));
 
         rclcpp::on_shutdown([this]() { this->generateMap(); });
 
@@ -212,9 +212,9 @@ void MapperNode::generateMap()
     std::cout << "======= RESUMEN DE TRAYECTORIA =======" << std::endl;
     std::cout << "  Poses totales   : " << poses.size()                          << std::endl;
     std::cout << "  Duración        : " << duration       << " s"                << std::endl;
-    std::cout << "  Distancia total : " << total_distance << " px"                << std::endl;
-    std::cout << "  Rango X         : [" << min_x << ", " << max_x << "] px"      << std::endl;
-    std::cout << "  Rango Y         : [" << min_y << ", " << max_y << "] px"      << std::endl;
+    std::cout << "  Distancia total : " << total_distance << " m"                 << std::endl;
+    std::cout << "  Rango X         : [" << min_x << ", " << max_x << "] m"       << std::endl;
+    std::cout << "  Rango Y         : [" << min_y << ", " << max_y << "] m"       << std::endl;
     std::cout << "  Pose final      : (" << poses.back().x  << ", "
                                          << poses.back().y  << ") θ="
                                          << poses.back().theta  << " rad"        << std::endl;
@@ -244,14 +244,14 @@ void MapperNode::generateMap()
 
         double world_x = min_x + (double)i / num_divisions * scale - off_x;
         std::ostringstream label_x;
-        label_x << std::fixed << std::setprecision(3) << world_x << "px";
+        label_x << std::fixed << std::setprecision(3) << world_x << "m";
         cv::putText(img, label_x.str(),
                     {offset_x - 18, kImgHeight - kMarginBottom + 20},
                     cv::FONT_HERSHEY_SIMPLEX, 0.35, {80, 80, 80}, 1, cv::LINE_AA);
 
         double world_y = min_y + (1.0 - (double)i / num_divisions) * scale - off_y;
         std::ostringstream label_y;
-        label_y << std::fixed << std::setprecision(3) << world_y << "px";
+        label_y << std::fixed << std::setprecision(3) << world_y << "m";
         cv::putText(img, label_y.str(),
                     {40, offset_y + 4},
                     cv::FONT_HERSHEY_SIMPLEX, 0.35, {80, 80, 80}, 1, cv::LINE_AA);
@@ -266,11 +266,11 @@ void MapperNode::generateMap()
                 {kMarginLeft, kMarginTop}, {kImgWidth - kMarginRight, kImgHeight - kMarginBottom},
                 cv::Scalar(150, 150, 150), 1);
 
-    cv::putText(img, "X (px)", {kImgWidth / 2 - 15, kImgHeight - 17},
+    cv::putText(img, "X (m)", {kImgWidth / 2 - 15, kImgHeight - 17},
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, {50, 50, 50}, 1, cv::LINE_AA);
 
     cv::Mat y_label(30, 60, CV_8UC3, cv::Scalar(255, 255, 255));
-    cv::putText(y_label, "Y (px)", {0, 20},
+    cv::putText(y_label, "Y (m)", {0, 20},
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, {50, 50, 50}, 1, cv::LINE_AA);
     cv::Mat y_rotated;
     cv::rotate(y_label, y_rotated, cv::ROTATE_90_COUNTERCLOCKWISE);

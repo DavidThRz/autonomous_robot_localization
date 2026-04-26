@@ -11,7 +11,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include <opencv2/opencv.hpp>
 #include <sensor_msgs/msg/image.hpp>
-#include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/twist_with_covariance_stamped.hpp"
 #include <std_msgs/msg/bool.hpp>
 
 struct state_space_t
@@ -33,8 +33,8 @@ public:
         img_pub_ =
             create_publisher<sensor_msgs::msg::Image>("stream/image", 1);
 
-        pose_pub_ =
-            create_publisher<geometry_msgs::msg::PoseStamped>("odometry/position", 10);
+        twist_pub_ =
+            create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("odometry/visual", 10);
         
         img_sub_ = 
             create_subscription<sensor_msgs::msg::Image>("camera/image", qos, std::bind(&VisualNode::imgCallback, this, std::placeholders::_1));
@@ -45,6 +45,8 @@ public:
         this->declare_parameter<double>("focal_length_mm", 3.6);
         this->declare_parameter<double>("pixel_size_um", 1.4);
         this->declare_parameter<double>("camera_height_m", 0.097);
+        this->declare_parameter<double>("vo_covariance_linear",  0.05);
+        this->declare_parameter<double>("vo_covariance_angular", 0.10);
 
         stream_msg_.header.frame_id = "camera_frame";
         stream_msg_.encoding = "mono8";
@@ -67,12 +69,12 @@ private:
     sensor_msgs::msg::Image stream_msg_;
     bool stream_status_active_;
 
-    int skip_frames_aux_{0};
-    cv::Mat prev_frame_;
-    state_space_t position_{0.0, 0.0, 0.0};
+    int          skip_frames_aux_{0};
+    cv::Mat      prev_frame_;
+    rclcpp::Time prev_stamp_;
 
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr twist_pub_;
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr img_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stream_status_sub_;
@@ -218,9 +220,12 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
     new_frame_ = cv::Mat(msg->height, msg->width, CV_8UC1, const_cast<uint8_t*>(msg->data.data()), msg->step);
 
-    if (prev_frame_.empty()) 
+    const rclcpp::Time curr_stamp(msg->header.stamp);
+
+    if (prev_frame_.empty())
     {
         prev_frame_ = new_frame_.clone();
+        prev_stamp_ = curr_stamp;
         return;
     }
 
@@ -228,35 +233,45 @@ void VisualNode::imgCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
     // computeOpticalFlowFarneback(prev_frame_, new_frame_, prev_pts, curr_pts);
     computeOpticalFlowLK(prev_frame_, new_frame_, prev_pts, curr_pts);
+
+    const double dt = (curr_stamp - prev_stamp_).seconds();
     prev_frame_ = new_frame_.clone();
+    prev_stamp_ = curr_stamp;
+
+    /* Guard against invalid inter-frame timestamps */
+    if (dt <= 0.0 || dt > 2.0)
+        return;
 
     removeOutliers(prev_pts, curr_pts);
 
-    /* Paint frame to stream */
+    /* Paint optical-flow vectors onto the frame for streaming */
     for (size_t i = 0; i < prev_pts.size(); ++i)
     {
         cv::arrowedLine(new_frame_, prev_pts[i], curr_pts[i], cv::Scalar(0, 0, 255), 2, cv::LINE_AA, 0, 0.3);
         cv::circle(new_frame_, curr_pts[i], 2, cv::Scalar(0, 255, 0), -1);
     }
 
-    double camera_height_m = this->get_parameter("camera_height_m").as_double();
+    const double camera_height_m = this->get_parameter("camera_height_m").as_double();
+    constexpr double focal_length_px = 1290.0;
+    const double scale = camera_height_m / focal_length_px;
 
-    double focal_length_px = 1290;
-    double scale = camera_height_m / focal_length_px;
+    const state_space_t vel = computeVelocity(prev_pts, curr_pts, scale);
 
-    state_space_t vel = computeVelocity(prev_pts, curr_pts, scale);
+    /* Convert per-frame pixel-scale deltas → body-frame velocities (m/s, rad/s) */
+    const double cov_lin = this->get_parameter("vo_covariance_linear").as_double();
+    const double cov_ang = this->get_parameter("vo_covariance_angular").as_double();
 
-    position_.linear_x += vel.linear_x;
-    position_.linear_y += vel.linear_y;
-    position_.angular_z += vel.angular_z;
-
-    geometry_msgs::msg::PoseStamped  pose_msg;
-    pose_msg.header.frame_id = "map";
-    pose_msg.header.stamp = msg->header.stamp;
-    pose_msg.pose.position.x = position_.linear_x;
-    pose_msg.pose.position.y = position_.linear_y;
-    pose_msg.pose.orientation.z = position_.angular_z;
-    pose_pub_->publish(pose_msg);
+    geometry_msgs::msg::TwistWithCovarianceStamped twist_msg;
+    twist_msg.header.frame_id             = "base_link";
+    twist_msg.header.stamp                = msg->header.stamp;
+    twist_msg.twist.twist.linear.x        = vel.linear_x  / dt;  // vx  (m/s)
+    twist_msg.twist.twist.linear.y        = vel.linear_y  / dt;  // vy  (m/s)
+    twist_msg.twist.twist.angular.z       = vel.angular_z / dt;  // ωz (rad/s)
+    /* Covariance 6×6 row-major [vx,vy,vz,wx,wy,wz] — diagonal only */
+    twist_msg.twist.covariance[0]         = cov_lin;   // σ²(vx)
+    twist_msg.twist.covariance[7]         = cov_lin;   // σ²(vy)
+    twist_msg.twist.covariance[35]        = cov_ang;   // σ²(ωz)
+    twist_pub_->publish(twist_msg);
 
     if (stream_status_active_)
     {

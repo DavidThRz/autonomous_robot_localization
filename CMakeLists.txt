@@ -14,6 +14,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(Eigen3 REQUIRED)
 pkg_check_modules(libcamera REQUIRED libcamera)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -73,6 +74,14 @@ target_include_directories(imu_node PUBLIC
 ament_target_dependencies(imu_node rclcpp sensor_msgs std_srvs)
 target_link_libraries(imu_node yaml-cpp)
 
+# --- EKF node ---
+add_executable(ekf_node src/ekf/ekf_main.cpp src/ekf/ekf_node.cpp)
+target_include_directories(ekf_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/ekf/include>
+)
+ament_target_dependencies(ekf_node rclcpp sensor_msgs geometry_msgs)
+target_link_libraries(ekf_node Eigen3::Eigen)
+
 # Installation
 install(TARGETS 
   photographer_node
@@ -80,6 +89,7 @@ install(TARGETS
   streaming_node
   mapper_node
   imu_node
+  ekf_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

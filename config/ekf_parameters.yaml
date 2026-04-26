@@ -1,0 +1,22 @@
+ekf_node:
+  ros__parameters:
+    # ── Process noise covariance (Q) diagonal ─────────────────────────────
+    # Tune these values based on how much you trust the kinematic model vs the sensors.
+    # Larger values → filter trusts measurements more (faster response, more noise).
+    # Smaller values → filter trusts the model more (smoother, but slower to adapt).
+
+    # σ² for x, y position states (m²)
+    process_noise_position: 0.01
+
+    # σ² for θ heading state (rad²)
+    process_noise_yaw: 0.01
+
+    # σ² for vx, vy body-frame velocity states ((m/s)²)
+    process_noise_velocity: 0.10
+
+    # σ² for ωz angular rate state ((rad/s)²)
+    process_noise_omega: 0.05
+
+    # Maximum allowed dt between IMU messages before skipping predict (s).
+    # Protects against large state jumps if IMU drops out momentarily.
+    max_dt: 0.5

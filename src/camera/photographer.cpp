@@ -20,6 +20,8 @@
 
 using namespace libcamera;
 
+// TODO: correct images
+
 class Photographer : public rclcpp::Node
 {
 public:
