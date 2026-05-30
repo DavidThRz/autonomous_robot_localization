@@ -13,6 +13,7 @@ IMU_Node::IMU_Node() : Node("imu_node")
     this->declare_parameter<int>("publish_rate_freq", 10);
     this->declare_parameter<std::string>("frame_id", "imu_link");
     this->declare_parameter<std::string>("covariance_file", "");
+    this->declare_parameter<std::string>("tilt_calibration_file", "");
 
     frame_id_ = this->get_parameter("frame_id").as_string();
 
@@ -56,7 +57,6 @@ IMU_Node::IMU_Node() : Node("imu_node")
         std::bind(&IMU_Node::calibrateIMUCovariances, this, std::placeholders::_1, std::placeholders::_2)
     );
 
-    sum_gyro_x = sum_gyro_y = sum_gyro_z = 0.0;
     sum_accl_x = sum_accl_y = sum_accl_z = 0.0;
     num_samples_ = 0;
 
@@ -92,8 +92,40 @@ IMU_Node::IMU_Node() : Node("imu_node")
     else
     {
         RCLCPP_WARN(this->get_logger(), 
-            "No covariance calibration file found, using default values. "
-            "Run the covariance calibration service to generate calibration data.");
+            "No covariance calibration file found, using default values"
+            "Run the covariance calibration service to generate calibration data");
+    }
+
+    /* Resolve tilt calibration file path */
+    tilt_calibration_file_path_ = this->get_parameter("tilt_calibration_file").as_string();
+    if (tilt_calibration_file_path_.empty())
+    {
+        const char* home = std::getenv("HOME");
+        if (home)
+        {
+            tilt_calibration_file_path_ = std::string(home) + "/.ros/imu_tilt_calibration.yaml";
+        }
+        else
+        {
+            tilt_calibration_file_path_ = "/tmp/imu_tilt_calibration.yaml";
+            RCLCPP_WARN(this->get_logger(), "HOME not set, using fallback tilt path: %s", tilt_calibration_file_path_.c_str());
+        }
+    }
+    RCLCPP_INFO(this->get_logger(), "Tilt calibration file path: %s", tilt_calibration_file_path_.c_str());
+
+    /* Attempt to load previously calibrated tilt from file */
+    if (loadTiltFromFile())
+    {
+        RCLCPP_INFO(this->get_logger(), 
+            "Loaded tilt calibration from file — Roll: %.4f° Pitch: %.4f°",
+            roll_rad_ * 180.0 / ADIS16460_driver::kPi,
+            pitch_rad_ * 180.0 / ADIS16460_driver::kPi);
+    }
+    else
+    {
+        RCLCPP_WARN(this->get_logger(), 
+            "No tilt calibration file found. Accelerations will NOT be tilt-compensated"
+            "Run: ros2 service call /imu_calibration std_srvs/srv/Trigger");
     }
 
     imu_state_ = ImuState::RUNNING;
@@ -116,6 +148,8 @@ void IMU_Node::publishIMUData()
         RCLCPP_ERROR(this->get_logger(), "Error reading IMU data");
         return;
     }
+
+    applyTiltCompensation(accl_x, accl_y, accl_z);
 
     sensor_msgs::msg::Imu imu_msg;
     imu_msg.header.stamp = this->get_clock()->now();
@@ -147,10 +181,37 @@ void IMU_Node::publishIMUData()
     }
 }
 
+void IMU_Node::applyTiltCompensation(double& accl_x, double& accl_y, double& accl_z)
+{
+    if (!tilt_calibrated_)
+        return;
+
+    /* Rotate acceleration vector using pre-computed rotation matrix R (row-major 3x3)
+     *
+     * R = Ry(pitch) · Rx(roll), stored as tilt_rotation_matrix_[0..8]:
+     *   [r00, r01, r02]     [accl_x]     [ax']
+     *   [r10, r11, r12]  ·  [accl_y]  =  [ay']
+     *   [r20, r21, r22]     [accl_z]     [az']
+     */
+    const double ax = tilt_rotation_matrix_[0] * accl_x
+                    + tilt_rotation_matrix_[1] * accl_y
+                    + tilt_rotation_matrix_[2] * accl_z;
+    const double ay = tilt_rotation_matrix_[3] * accl_x
+                    + tilt_rotation_matrix_[4] * accl_y
+                    + tilt_rotation_matrix_[5] * accl_z;
+    const double az = tilt_rotation_matrix_[6] * accl_x
+                    + tilt_rotation_matrix_[7] * accl_y
+                    + tilt_rotation_matrix_[8] * accl_z;
+
+    accl_x = ax;
+    accl_y = ay;
+    accl_z = az - ADIS16460_driver::kGravity;
+}
+
 void IMU_Node::calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
     (void)request;
-    RCLCPP_INFO(this->get_logger(), "Starting IMU calibration...");
+    RCLCPP_INFO(this->get_logger(), "Starting IMU tilt calibration...");
 
     if (imu_state_ == ImuState::CALIBRATING || imu_state_ == ImuState::CALIBRATING_COVARIANCES) 
     {
@@ -161,9 +222,6 @@ void IMU_Node::calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Reques
 
     imu_state_ = ImuState::CALIBRATING;
 
-    sum_gyro_x = 0.0;
-    sum_gyro_y = 0.0;
-    sum_gyro_z = 0.0;
     sum_accl_x = 0.0;
     sum_accl_y = 0.0;
     sum_accl_z = 0.0;
@@ -171,17 +229,10 @@ void IMU_Node::calibrateIMU(const std::shared_ptr<std_srvs::srv::Trigger::Reques
     num_samples_ = 0;
     calibration_start_time_ = this->get_clock()->now();
 
-    if (!imu_driver_->getBiasOffsets(gyro_x_bias_, gyro_y_bias_, gyro_z_bias_, accl_x_bias_, accl_y_bias_, accl_z_bias_))
-    {
-        RCLCPP_ERROR(this->get_logger(), "Failed to read current bias offsets from IMU");
-        imu_state_ = ImuState::RUNNING;
-        response->success = false;
-        response->message = "Failed to read bias offsets from IMU";
-        return;
-    }
+    tilt_calibrated_ = false;
 
     response->success = true;
-    response->message = "Starting calibration process";
+    response->message = "Starting calibration process (keep robot STILL)";
 }
 
 void IMU_Node::calibrateIMUCovariances(const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response)
@@ -214,9 +265,6 @@ void IMU_Node::calibrateIMUCovariances(const std::shared_ptr<std_srvs::srv::Trig
 void IMU_Node::computeCalibration(const sensor_msgs::msg::Imu& imu_msg)
 {
     num_samples_++;
-    sum_gyro_x += imu_msg.angular_velocity.x;
-    sum_gyro_y += imu_msg.angular_velocity.y;
-    sum_gyro_z += imu_msg.angular_velocity.z;
     sum_accl_x += imu_msg.linear_acceleration.x;
     sum_accl_y += imu_msg.linear_acceleration.y;
     sum_accl_z += imu_msg.linear_acceleration.z;
@@ -224,26 +272,47 @@ void IMU_Node::computeCalibration(const sensor_msgs::msg::Imu& imu_msg)
     if ((this->get_clock()->now() - calibration_start_time_).seconds() < kCalibrationDurationSec)
         return;
 
-    sum_gyro_x = sum_gyro_x / num_samples_ - gyro_x_bias_;
-    sum_gyro_y = sum_gyro_y / num_samples_ - gyro_y_bias_;
-    sum_gyro_z = sum_gyro_z / num_samples_ - gyro_z_bias_;
-    sum_accl_x = sum_accl_x / num_samples_ - accl_x_bias_;
-    sum_accl_y = sum_accl_y / num_samples_ - accl_y_bias_;
-    sum_accl_z = sum_accl_z / num_samples_ - accl_z_bias_;
-    sum_accl_z += ADIS16460_driver::kGravity; /* Remove gravity from Z axis */
+    const double mean_ax = sum_accl_x / num_samples_;
+    const double mean_ay = sum_accl_y / num_samples_;
+    const double mean_az = sum_accl_z / num_samples_;
 
-    RCLCPP_INFO(this->get_logger(), "Calibration results (bias estimates):");
-    RCLCPP_INFO(this->get_logger(), "  Gyro bias (rad/s): x=%.6f, y=%.6f, z=%.6f", sum_gyro_x, sum_gyro_y, sum_gyro_z);
-    RCLCPP_INFO(this->get_logger(), "  Accel bias (m/s2): x=%.6f, y=%.6f, z=%.6f", sum_accl_x, sum_accl_y, sum_accl_z);
+    roll_rad_  = std::atan2(mean_ay, mean_az);
+    pitch_rad_ = std::atan2(-mean_ax, std::sqrt(mean_ay * mean_ay + mean_az * mean_az));
 
-    if (!imu_driver_->setBiasOffsets(-sum_gyro_x, -sum_gyro_y, -sum_gyro_z, -sum_accl_x, -sum_accl_y, -sum_accl_z))
+    const double cp = std::cos(pitch_rad_);  /* cos(θ) */
+    const double sp = std::sin(pitch_rad_);  /* sin(θ) */
+    const double cr = std::cos(roll_rad_);   /* cos(φ) */
+    const double sr = std::sin(roll_rad_);   /* sin(φ) */
+
+    tilt_rotation_matrix_[0] =  cp;        tilt_rotation_matrix_[1] = sp * sr;    tilt_rotation_matrix_[2] = sp * cr;
+    tilt_rotation_matrix_[3] =  0.0;       tilt_rotation_matrix_[4] = cr;         tilt_rotation_matrix_[5] = -sr;
+    tilt_rotation_matrix_[6] = -sp;        tilt_rotation_matrix_[7] = cp * sr;    tilt_rotation_matrix_[8] = cp * cr;
+
+    tilt_calibrated_ = true;
+
+    const double roll_deg  = roll_rad_  * 180.0 / ADIS16460_driver::kPi;
+    const double pitch_deg = pitch_rad_ * 180.0 / ADIS16460_driver::kPi;
+
+    RCLCPP_INFO(this->get_logger(), "Tilt calibration completed (%u samples):", num_samples_);
+    RCLCPP_INFO(this->get_logger(), "  Mean gravity vector (m/s²): ax=%.4f, ay=%.4f, az=%.4f", mean_ax, mean_ay, mean_az);
+    RCLCPP_INFO(this->get_logger(), "  Roll:  %.4f rad (%.4f°)", roll_rad_, roll_deg);
+    RCLCPP_INFO(this->get_logger(), "  Pitch: %.4f rad (%.4f°)", pitch_rad_, pitch_deg);
+    RCLCPP_INFO(this->get_logger(), "  Rotation matrix R:");
+    RCLCPP_INFO(this->get_logger(), "    [%+.6f  %+.6f  %+.6f]", tilt_rotation_matrix_[0], tilt_rotation_matrix_[1], tilt_rotation_matrix_[2]);
+    RCLCPP_INFO(this->get_logger(), "    [%+.6f  %+.6f  %+.6f]", tilt_rotation_matrix_[3], tilt_rotation_matrix_[4], tilt_rotation_matrix_[5]);
+    RCLCPP_INFO(this->get_logger(), "    [%+.6f  %+.6f  %+.6f]", tilt_rotation_matrix_[6], tilt_rotation_matrix_[7], tilt_rotation_matrix_[8]);
+
+    /* Persist tilt calibration to file for reuse across restarts */
+    if (saveTiltToFile())
     {
-        RCLCPP_ERROR(this->get_logger(), "Failed to write bias offsets to IMU");
+        RCLCPP_INFO(this->get_logger(), "Tilt calibration saved to: %s", tilt_calibration_file_path_.c_str());
+    }
+    else
+    {
+        RCLCPP_ERROR(this->get_logger(), "Failed to save tilt calibration to: %s", tilt_calibration_file_path_.c_str());
     }
 
-    RCLCPP_INFO(this->get_logger(), "Calibration completed");
     imu_state_ = ImuState::RUNNING;
-
 }
 
 void IMU_Node::computeCovariancesCalibration(const sensor_msgs::msg::Imu& imu_msg)
@@ -475,6 +544,161 @@ bool IMU_Node::saveCovariancesToFile()
     {
         RCLCPP_ERROR(this->get_logger(), "Failed to save covariance file '%s': %s", 
             covariance_file_path_.c_str(), e.what());
+        return false;
+    }
+}
+
+bool IMU_Node::loadTiltFromFile()
+{
+    if (!std::filesystem::exists(tilt_calibration_file_path_))
+    {
+        return false;
+    }
+
+    try
+    {
+        YAML::Node config = YAML::LoadFile(tilt_calibration_file_path_);
+
+        if (!config["tilt_calibration"])
+        {
+            RCLCPP_WARN(this->get_logger(), "Tilt file exists but missing 'tilt_calibration' key: %s", tilt_calibration_file_path_.c_str());
+            return false;
+        }
+
+        YAML::Node tilt = config["tilt_calibration"];
+
+        /* Load roll and pitch angles */
+        if (!tilt["roll_rad"] || !tilt["pitch_rad"])
+        {
+            RCLCPP_WARN(this->get_logger(), "Tilt file missing 'roll_rad' or 'pitch_rad'");
+            return false;
+        }
+        roll_rad_  = tilt["roll_rad"].as<double>();
+        pitch_rad_ = tilt["pitch_rad"].as<double>();
+
+        /* Load rotation matrix */
+        if (!tilt["rotation_matrix"] || tilt["rotation_matrix"].size() != 9)
+        {
+            RCLCPP_WARN(this->get_logger(), "Tilt file missing or invalid 'rotation_matrix' (need 9 elements)");
+            return false;
+        }
+        for (size_t i = 0; i < 9; ++i)
+        {
+            tilt_rotation_matrix_[i] = tilt["rotation_matrix"][i].as<double>();
+        }
+
+        tilt_calibrated_ = true;
+
+        /* Log calibration metadata if available */
+        if (tilt["timestamp"])
+        {
+            RCLCPP_INFO(this->get_logger(), "Tilt calibration was performed at: %s", 
+                tilt["timestamp"].as<std::string>().c_str());
+        }
+        if (tilt["num_samples"])
+        {
+            RCLCPP_INFO(this->get_logger(), "Tilt calibration used %d samples", 
+                tilt["num_samples"].as<int>());
+        }
+
+        return true;
+    }
+    catch (const YAML::ParserException& e)
+    {
+        RCLCPP_ERROR(this->get_logger(), "Failed to parse tilt file '%s': %s", 
+            tilt_calibration_file_path_.c_str(), e.what());
+        return false;
+    }
+    catch (const YAML::BadConversion& e)
+    {
+        RCLCPP_ERROR(this->get_logger(), "Invalid data type in tilt file '%s': %s", 
+            tilt_calibration_file_path_.c_str(), e.what());
+        return false;
+    }
+    catch (const std::exception& e)
+    {
+        RCLCPP_ERROR(this->get_logger(), "Unexpected error loading tilt file '%s': %s", 
+            tilt_calibration_file_path_.c_str(), e.what());
+        return false;
+    }
+}
+
+bool IMU_Node::saveTiltToFile()
+{
+    try
+    {
+        /* Create parent directories if they don't exist */
+        std::filesystem::path file_path(tilt_calibration_file_path_);
+        if (file_path.has_parent_path())
+        {
+            std::filesystem::create_directories(file_path.parent_path());
+        }
+
+        /* Generate ISO 8601 timestamp */
+        auto now = std::chrono::system_clock::now();
+        auto time_t_now = std::chrono::system_clock::to_time_t(now);
+        std::tm tm_now{};
+        gmtime_r(&time_t_now, &tm_now);
+        std::ostringstream timestamp_ss;
+        timestamp_ss << std::put_time(&tm_now, "%Y-%m-%dT%H:%M:%SZ");
+
+        /* Build YAML document */
+        YAML::Emitter out;
+        out << YAML::Comment("IMU Tilt Calibration Data - Auto-generated by imu_node");
+        out << YAML::Comment("Compensates static mounting tilt by projecting accelerations to horizontal plane");
+        out << YAML::Comment("References: Analog Devices AN-1057, NXP AN3461, STMicroelectronics AN3461");
+        out << YAML::BeginMap;
+        out << YAML::Key << "tilt_calibration" << YAML::Value;
+        out << YAML::BeginMap;
+
+        out << YAML::Key << "timestamp" << YAML::Value << timestamp_ss.str();
+        out << YAML::Key << "num_samples" << YAML::Value << static_cast<int>(num_samples_);
+        out << YAML::Key << "duration_sec" << YAML::Value << static_cast<double>(kCalibrationDurationSec);
+
+        out << YAML::Key << "roll_rad" << YAML::Value << roll_rad_;
+        out << YAML::Key << "pitch_rad" << YAML::Value << pitch_rad_;
+        out << YAML::Key << "roll_deg" << YAML::Value << (roll_rad_ * 180.0 / ADIS16460_driver::kPi);
+        out << YAML::Key << "pitch_deg" << YAML::Value << (pitch_rad_ * 180.0 / ADIS16460_driver::kPi);
+
+        out << YAML::Key << "rotation_matrix" << YAML::Value;
+        out << YAML::Flow << YAML::BeginSeq;
+        for (size_t i = 0; i < 9; ++i)
+        {
+            out << tilt_rotation_matrix_[i];
+        }
+        out << YAML::EndSeq;
+
+        out << YAML::EndMap;
+        out << YAML::EndMap;
+
+        /* Write to file atomically: write to temp file first, then rename */
+        std::string temp_path = tilt_calibration_file_path_ + ".tmp";
+        std::ofstream fout(temp_path);
+        if (!fout.is_open())
+        {
+            RCLCPP_ERROR(this->get_logger(), "Cannot open file for writing: %s", temp_path.c_str());
+            return false;
+        }
+
+        fout << out.c_str() << std::endl;
+        fout.close();
+
+        if (fout.fail())
+        {
+            RCLCPP_ERROR(this->get_logger(), "Error writing to file: %s", temp_path.c_str());
+            std::filesystem::remove(temp_path);
+            return false;
+        }
+
+        /* Atomic rename to prevent corruption if interrupted mid-write */
+        std::filesystem::rename(temp_path, tilt_calibration_file_path_);
+
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        RCLCPP_ERROR(this->get_logger(), "Failed to save tilt file '%s': %s", 
+            tilt_calibration_file_path_.c_str(), e.what());
         return false;
     }
 }

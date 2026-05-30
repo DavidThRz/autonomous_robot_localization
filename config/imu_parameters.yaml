@@ -4,3 +4,4 @@ imu_node:
     publish_rate_freq: 100
     frame_id: "imu_link"
     covariance_file: ""  # Path to covariance calibration file. Empty = ~/.ros/imu_covariance_calibration.yaml
+    tilt_calibration_file: ""  # Path to tilt calibration file. Empty = ~/.ros/imu_tilt_calibration.yaml

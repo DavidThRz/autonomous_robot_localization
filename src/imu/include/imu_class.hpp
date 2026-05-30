@@ -10,6 +10,8 @@
 #include <yaml-cpp/yaml.h>
 #include <filesystem>
 #include <memory>
+#include <array>
+#include <cmath>
 
 
 
@@ -41,9 +43,16 @@ private:
 
     void computeCovariancesCalibration(const sensor_msgs::msg::Imu& imu_msg);
 
+    /* Tilt compensation: rotates acceleration vector to horizontal plane */
+    void applyTiltCompensation(double& accl_x, double& accl_y, double& accl_z);
+
     /* Covariance persistence methods */
     bool loadCovariancesFromFile();
     bool saveCovariancesToFile();
+
+    /* Tilt calibration persistence methods */
+    bool loadTiltFromFile();
+    bool saveTiltToFile();
 
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr calibration_service;
@@ -53,7 +62,6 @@ private:
     std::unique_ptr<ADIS16460_driver> imu_driver_;
     ImuState imu_state_;
 
-    double sum_gyro_x, sum_gyro_y, sum_gyro_z;
     double sum_accl_x, sum_accl_y, sum_accl_z;
 
     /* Welford's online algorithm running statistics */
@@ -68,11 +76,15 @@ private:
     double gyro_x_covariance_, gyro_y_covariance_, gyro_z_covariance_;
     double accl_x_covariance_, accl_y_covariance_, accl_z_covariance_;
 
-    double gyro_x_bias_, gyro_y_bias_, gyro_z_bias_;
-    double accl_x_bias_, accl_y_bias_, accl_z_bias_;
+    /* Tilt calibration state */
+    double roll_rad_{0.0};
+    double pitch_rad_{0.0};
+    std::array<double, 9> tilt_rotation_matrix_{};  /* 3x3 row-major: R = Ry(pitch) · Rx(roll) */
+    bool tilt_calibrated_{false};
 
     std::string frame_id_;
     std::string covariance_file_path_;
+    std::string tilt_calibration_file_path_;
 };
 
 #endif
