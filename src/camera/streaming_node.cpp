@@ -137,7 +137,20 @@ void StreamingNode::streamServer()
         return;
     }
 
-    RCLCPP_INFO(this->get_logger(), "Streaming at http://0.0.0.0:8080/stream");
+char buffer[128];
+    std::string system_ip = "0.0.0.0";
+    FILE* pipe = popen("hostname -I | cut -d' ' -f1", "r");
+    if (pipe) {
+        if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            system_ip = buffer;
+            if (!system_ip.empty() && system_ip.back() == '\n') {
+                system_ip.pop_back();
+            }
+        }
+        pclose(pipe);
+    }
+
+    RCLCPP_INFO(this->get_logger(), "Streaming at http://%s:8080/stream", system_ip.c_str());
 
     rclcpp::on_shutdown([&svr]()
     {
