@@ -56,11 +56,11 @@ public:
         {
             if (std::chrono::steady_clock::now() - start_wait >= std::chrono::seconds(20))
             {
-                std::cout << "Timeout (20s) reached. Map not generated. Shutdown aborting stream." << std::endl;
+                RCLCPP_ERROR(this->get_logger(), "Timeout (20s) reached. Map not generated. Shutdown aborting stream.");
                 return;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            std::cout << "waiting for map generation to finish..." << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Small delay to avoid busy-waiting
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1.0, "Waiting for map to be generated...");
         }
         std::cout << "Map found, sending to stream..." << std::endl;
 

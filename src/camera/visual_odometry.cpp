@@ -27,7 +27,7 @@ public:
     VisualNode() : Node("visual_estimator_node")
     {
         rclcpp::QoS qos(3);
-        qos.reliable();
+        qos.best_effort();
         qos.durability_volatile();
 
         img_pub_ =

@@ -17,6 +17,7 @@
 #include <libcamera/framebuffer_allocator.h>
 #include <libcamera/camera_manager.h>
 #include <sys/mman.h>
+#include <map>
 
 using namespace libcamera;
 
@@ -29,7 +30,7 @@ public:
     Photographer() : Node("photographer_node")
     {
         rclcpp::QoS qos(rclcpp::KeepLast(3));
-        qos.reliable();
+        qos.best_effort();
         qos.durability_volatile();
 
         publisher_ =
@@ -58,11 +59,11 @@ public:
         RCLCPP_INFO(this->get_logger(), "Camera acquired: %s", camera_->id().c_str());
 
         // Configure camera
-        config = camera_->generateConfiguration( { StreamRole::StillCapture } );  //This may affect performance, try StreamRole::Viewfinder or StreamRole::VideoRecording for better fps    
+        config = camera_->generateConfiguration( { StreamRole::Viewfinder } );
         streamConfig_ = &config->at(0);
         streamConfig_->size.width  = 1024; // 1920;
         streamConfig_->size.height = 768; // 1080;
-        streamConfig_->pixelFormat = libcamera::formats::BGR888;
+        streamConfig_->pixelFormat = libcamera::formats::YUV420;
         RCLCPP_INFO(this->get_logger(), "Selected camera configuration: %s", streamConfig_->toString().c_str());
         config->validate();
         camera_->configure(config.get());
@@ -78,33 +79,48 @@ public:
 
         // Create request
         static Stream *stream = streamConfig_->stream();
-        request_ = camera_->createRequest();
-        if (!request_)
-        {
-            RCLCPP_ERROR(this->get_logger(), "Failed to create request");
-            return;
-        }
-
-        const std::unique_ptr<FrameBuffer> &buffer = allocator_->buffers(stream)[0];
-        ret = request_->addBuffer(stream, buffer.get());
-        if (ret < 0)
-        {
-            RCLCPP_ERROR(this->get_logger(), "Failed to add buffer to request");
-            return;
+        const std::vector<std::unique_ptr<FrameBuffer>> &buffers = allocator_->buffers(stream);
+        for (unsigned int i = 0; i < buffers.size(); ++i) {
+            std::unique_ptr<Request> request = camera_->createRequest();
+            if (!request)
+            {
+                RCLCPP_ERROR(this->get_logger(), "Failed to create request");
+                return;
+            }
+            int ret = request->addBuffer(stream, buffers[i].get());
+            if (ret < 0)
+            {
+                RCLCPP_ERROR(this->get_logger(), "Failed to add buffer to request");
+                return;
+            }
+            requests_.push_back(std::move(request));
         }
 
         // Connect callback
         camera_->requestCompleted.connect(this, &Photographer::imageCaptured);
+        
+        int64_t frame_time = 1000000 / 30; // 33333 microseconds for 30 FPS
+        std::array<int64_t, 2> frame_duration_limits = { frame_time, frame_time };
+        ControlList controls(camera_->controls());
+        controls.set(controls::FrameDurationLimits, frame_duration_limits);
 
         RCLCPP_INFO(this->get_logger(), "Starting camera");
-        camera_->start();
-        camera_->queueRequest(request_.get());
+        camera_->start(&controls);
+        for (auto &request : requests_) {
+            camera_->queueRequest(request.get());
+        }
     }
 
     ~Photographer()
     {
         RCLCPP_INFO(this->get_logger(), "Stopping camera");
         camera_->stop();
+        for (auto const& [fd, mem] : mapped_buffers_) {
+            munmap(mem, mapped_lengths_[fd]);
+        }
+        mapped_buffers_.clear();
+        mapped_lengths_.clear();
+        requests_.clear();
         allocator_->free(streamConfig_->stream());
         delete allocator_;
         camera_->release();
@@ -122,10 +138,12 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr publisher_;
 
     std::shared_ptr<Camera> camera_;
-    std::unique_ptr<Request> request_;
+    std::vector<std::unique_ptr<Request>> requests_;
     FrameBufferAllocator *allocator_;
     StreamConfiguration *streamConfig_;
     std::unique_ptr<CameraManager> cm_;
+    std::map<int, void*> mapped_buffers_;
+    std::map<int, size_t> mapped_lengths_;
 };
 
 
@@ -134,10 +152,13 @@ void Photographer::imageCaptured(Request *request)
     if (request->status() == Request::RequestCancelled) 
     {
         std::cerr << "\nRequest was cancelled" << std::endl;
+
+        request->reuse(Request::ReuseBuffers);
+        camera_->queueRequest(request);
         return;
     }
 
-    const auto &metadata = request->metadata();
+    const ControlList &metadata = request->metadata();
     rclcpp::Time img_stamp;
     if (auto ts_opt = metadata.get(libcamera::controls::SensorTimestamp))
     {
@@ -146,28 +167,46 @@ void Photographer::imageCaptured(Request *request)
     }
 
     // Save buffers
-    const std::map<const Stream *, FrameBuffer *> &buffers = request->buffers();
-    for (auto bufferPair : buffers)
+    const auto& buffers = request->buffers();
+    if (buffers.empty())
     {
-        FrameBuffer *buffer = bufferPair.second;
+        RCLCPP_WARN(this->get_logger(), "No buffers in request");
+        request->reuse(Request::ReuseBuffers);
+        camera_->queueRequest(request);
+        return;
+    }
 
-        if (buffer->planes().empty())
-            continue;
+    auto [buffer_stream, buffer] = *buffers.begin();
+    const FrameBuffer::Plane &plane = buffer->planes()[0];
+    int fd = plane.fd.get();
 
-        const FrameBuffer::Plane &plane = buffer->planes()[0];
-        void *mem = mmap(nullptr, plane.length, PROT_READ | PROT_WRITE, MAP_SHARED, plane.fd.get(), 0);
-        if (mem == MAP_FAILED) 
+    void *mem = nullptr;
+    if (mapped_buffers_.find(fd) == mapped_buffers_.end())
+    {
+        mem = mmap(nullptr, plane.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (mem == MAP_FAILED)
         {
             std::cerr << "mmap failed\n";
-            continue;
         }
+        else
+        {
+            mapped_buffers_[fd] = mem;
+            mapped_lengths_[fd] = plane.length;
+        }
+    }
+    else
+    {
+        mem = mapped_buffers_[fd];
+    }
 
-        int width  = bufferPair.first->configuration().size.width;
-        int height = bufferPair.first->configuration().size.height;
+    if (mem != nullptr && mem != MAP_FAILED) {
+        int width  = buffer_stream->configuration().size.width;
+        int height = buffer_stream->configuration().size.height;
+        int stride = buffer_stream->configuration().stride;
 
-        img_ = cv::Mat(height, width, CV_8UC3, mem);
-        cv::cvtColor(img_, img_, cv::COLOR_BGR2GRAY);
-
+        // Get illuminance from YUV image
+        img_ = cv::Mat(height, width, CV_8UC1, mem, stride);
+        
         publishImage(img_stamp);
     }
 
