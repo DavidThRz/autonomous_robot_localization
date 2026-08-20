@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(autonomous_robot_localization_pkg)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -11,11 +15,12 @@ find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Eigen3 REQUIRED)
-pkg_check_modules(libcamera REQUIRED libcamera)
+pkg_check_modules(LIBCAMERA REQUIRED IMPORTED_TARGET libcamera)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -24,21 +29,19 @@ find_package(Threads REQUIRED)
 add_executable(photographer_node src/camera/photographer.cpp)
 target_include_directories(photographer_node PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/camera/include>
-    ${libcamera_INCLUDE_DIRS}
 )
 ament_target_dependencies(photographer_node rclcpp sensor_msgs)
 target_link_libraries(photographer_node
   ${OpenCV_LIBRARIES}
-  ${libcamera_LIBRARIES}
+  PkgConfig::LIBCAMERA
 )
 
 # --- Visual odometry node ---
 add_executable(visual_node src/camera/visual_odometry.cpp)
-# 3. CORRECCIÓN: Typo arreglado (PUBLIC_ -> PUBLIC)
 target_include_directories(visual_node PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/camera/include>
 )
-ament_target_dependencies(visual_node rclcpp sensor_msgs geometry_msgs)
+ament_target_dependencies(visual_node rclcpp sensor_msgs geometry_msgs std_msgs)
 target_link_libraries(visual_node
   ${OpenCV_LIBRARIES}
 )
@@ -47,13 +50,11 @@ target_link_libraries(visual_node
 add_executable(streaming_node src/camera/streaming_node.cpp)
 target_include_directories(streaming_node PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/camera/include>
-    ${libcamera_INCLUDE_DIRS} # 4. CORRECCIÓN: Añadido acceso a libcamera
 )
-ament_target_dependencies(streaming_node rclcpp sensor_msgs)
+ament_target_dependencies(streaming_node rclcpp sensor_msgs std_msgs)
 target_link_libraries(streaming_node
   ${OpenCV_LIBRARIES}
-  ${libcamera_LIBRARIES}      # 4. CORRECCIÓN: Añadido acceso a libcamera
-  Threads::Threads            # 4. CORRECCIÓN: Enlace correcto a pthread
+  Threads::Threads
 )
 
 # --- Mapper node ---
@@ -61,7 +62,7 @@ add_executable(mapper_node src/mapper.cpp)
 target_include_directories(mapper_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
-ament_target_dependencies(mapper_node rclcpp sensor_msgs geometry_msgs)
+ament_target_dependencies(mapper_node rclcpp geometry_msgs)
 target_link_libraries(mapper_node
   ${OpenCV_LIBRARIES}
 )
@@ -83,7 +84,7 @@ ament_target_dependencies(ekf_node rclcpp sensor_msgs geometry_msgs)
 target_link_libraries(ekf_node Eigen3::Eigen)
 
 # Installation
-install(TARGETS 
+install(TARGETS
   photographer_node
   visual_node
   streaming_node
@@ -99,5 +100,9 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}/
 )
 
-# Exporta el paquete
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
 ament_package()

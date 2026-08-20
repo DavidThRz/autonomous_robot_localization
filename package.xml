@@ -13,12 +13,16 @@
   <!-- Dependencias ROS -->
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
-  <depend>cv_bridge</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>std_srvs</depend>
-  <depend>yaml-cpp</depend>
 
   <!-- Dependencias de sistema -->
-  <exec_depend>libopencv-dev</exec_depend>
+  <depend>libopencv-dev</depend>
+  <depend>libeigen3-dev</depend>
+  <depend>libyaml-cpp-dev</depend>
+  <depend>libcamera-dev</depend>
+  <build_depend>pkg-config</build_depend>
 
   <!-- Dependencias de test -->
   <test_depend>ament_lint_auto</test_depend>

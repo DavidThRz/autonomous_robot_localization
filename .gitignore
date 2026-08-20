@@ -1,0 +1,32 @@
+# ROS 2 and colcon
+build/
+install/
+log/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated runtime data
+data/
+*.csv
+*.png
+*.bag
+*.db3
+
+# Local calibration files
+*.calibration.yaml
+
+# IDEs
+.vscode/
+.idea/
+
+# OS/editor files
+.DS_Store
+*.swp
