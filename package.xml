@@ -4,7 +4,7 @@
   <version>0.0.1</version>
   <description>Paquete para estimación de posición y streaming de cámara</description>
 
-  <maintainer email="david_thruiz@hotmail.es">David Thomas</maintainer>
+  <maintainer email="davdthor@gmail.com">David Thomas</maintainer>
   <license>Apache-2.0</license>
 
   <!-- Build tool -->
@@ -23,6 +23,12 @@
   <depend>libyaml-cpp-dev</depend>
   <depend>libcamera-dev</depend>
   <build_depend>pkg-config</build_depend>
+
+  <!-- Launch and replay runtime dependencies -->
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ros2bag</exec_depend>
 
   <!-- Dependencias de test -->
   <test_depend>ament_lint_auto</test_depend>

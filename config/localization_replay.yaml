@@ -1,0 +1,16 @@
+# Sobrescribe el reloj para los nodos que se ejecutan al reproducir un rosbag.
+visual_node:
+  ros__parameters:
+    use_sim_time: true
+
+ekf_node:
+  ros__parameters:
+    use_sim_time: true
+
+mapper_node:
+  ros__parameters:
+    use_sim_time: true
+
+streaming_node:
+  ros__parameters:
+    use_sim_time: true

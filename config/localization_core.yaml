@@ -1,0 +1,40 @@
+# Parámetros comunes para la localización en hardware.
+visual_node:
+  ros__parameters:
+    use_sim_time: false
+    focal_length_mm: 3.6
+    pixel_size_um: 1.4
+    camera_height_m: 0.097
+    vo_covariance_linear: 0.05
+    vo_covariance_angular: 0.10
+
+ekf_node:
+  ros__parameters:
+    use_sim_time: false
+    process_noise_position: 0.01
+    process_noise_yaw: 0.01
+    process_noise_velocity: 0.10
+    process_noise_omega: 0.05
+    max_dt: 0.5
+
+mapper_node:
+  ros__parameters:
+    use_sim_time: false
+    output_file: "robot_path.csv"
+
+streaming_node:
+  ros__parameters:
+    use_sim_time: false
+
+photographer_node:
+  ros__parameters:
+    use_sim_time: false
+
+imu_node:
+  ros__parameters:
+    use_sim_time: false
+    spi_device: "/dev/spidev0.0"
+    publish_rate_freq: 100
+    frame_id: "imu_link"
+    covariance_file: ""
+    tilt_calibration_file: ""
